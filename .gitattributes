@@ -1,0 +1,3 @@
+# Line endings. Text files are kept with LF in the repository and in a checkout.
+# tools/.gitattributes has the exceptions that matter: .bat files must keep CRLF (Windows), .command, .py and .pyw files must keep LF.
+* text=auto eol=lf

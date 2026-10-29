@@ -1,0 +1,15 @@
+# Everything the setup scripts download or create. None of it belongs in version control or in the zip download.
+# (The speech model alone is 652 MB, more than GitHub accepts for one file.)
+python/
+venv/
+uv/
+uv-cache/
+hf-cache/
+tmp/
+dev/
+logs/
+__pycache__/
+*.pyc
+*-transcript.json
+# The icon pictures that add-desktop-icon-windows.bat writes into this folder (video-redline.ico; older runs left video-review.ico).
+*.ico

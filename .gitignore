@@ -1,0 +1,21 @@
+# Local test environment of the audio-cleanup helper (several GB): never commit
+tools/python/
+tools/venv/
+tools/uv/
+tools/uv-cache/
+tools/hf-cache/
+tools/tmp/
+
+# Transcripts made next to videos
+*-transcript.json
+
+# OS and editor leftovers
+.DS_Store
+Thumbs.db
+*.log
+
+# Made on a person's computer by the icon script, and the release ZIP made by the maintainer
+tools/*.ico
+tools/logs/
+tools/__pycache__/
+/dist/

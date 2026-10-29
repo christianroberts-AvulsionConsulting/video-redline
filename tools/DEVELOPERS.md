@@ -1,0 +1,40 @@
+# Video Redline start-up files: notes for developers
+
+This page is for people who build or test the Windows start-up files. If you only want to use Video Redline, read `AUTOSTART.md` (and the `README.md` one folder up).
+
+## The files
+
+- `helper_launcher.pyw` is what the start-up entry runs (and what the icon starts when no helper answers): `venv\Scripts\pythonw.exe -E -X utf8 helper_launcher.pyw`. It ignores every command-line argument, starts `vrt_server.py` inside its own process, sends the helper's messages to `logs\helper.log` (or `video-redline-helper.log` in the temp folder when the tools folder cannot be written), and makes sure only one helper starts (a Windows mutex, then the helper's own "already running" check). No console window can appear: every program the helper starts is already started without a window. Each run writes the line `[launcher] Starting.` to the log; the setup file looks for it to prove that the command works, even when a helper is already running.
+- The only registry entry that setup writes is `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value `VideoReviewHelper` (the internal name keeps its old spelling on purpose). Setup also removes the value `VideoReviewHelper` under `...\Explorer\StartupApproved\Run` (Windows writes it when the entry is switched off in Settings), and so does the remove file. Earlier versions also wrote the key `HKCU\Software\Classes\videoreview` (a link handler for `videoreview://start`); setup no longer does, and the remove file still deletes it when it points at `helper_launcher.pyw`.
+- `open_video_review.pyw` is what the icon runs (`venv\Scripts\pythonw.exe -E -X utf8 open_video_review.pyw`). It keeps its old file name on purpose: icons made before the rename point at it. It asks `/status` on the helper's five ports **at the same time** (one thread per port, 0.3 seconds to connect, 1.5 seconds to read the answer: a helper that listens accepts at once, and a closed port on Windows never answers within 0.3 seconds, so with nothing running the check takes about a third of a second). If nobody answers, it starts `helper_launcher.pyw` detached, keeps the process handle, and asks again about every 0.25 seconds until a helper answers (measured with a monotonic clock).
+  - **The page opens after at most about 3.5 seconds** (`OPEN_AFTER_SECONDS`), even when the helper has not answered yet (a cold disk, a virus scanner looking at Python). The page's own card, with **Check again**, covers that moment. The opener then keeps waiting in the background, up to 30 seconds in all (`WAIT_SECONDS`), and shows its box **only if the helper never answers**. The lock (a named mutex, one per tools folder, which makes a second double-click do nothing while the first is still working, so one click never opens two tabs) is let go as soon as the page is open.
+  - If the launcher ends with a non-zero code, it stops waiting at once. Exit code 0 means another launcher (for example the sign-in start) is working on it, so it keeps waiting, but only until 10 seconds have passed since the start (`QUIET_END_SECONDS`).
+  - With a helper already running, or one that answers within 3.5 seconds, the page opens only after the helper answers, as before (about one second after the click when nothing was running).
+  - It opens `..\video-redline.html` (or `..\video-review.html` for an install from before the rename) the way a double-click does. It writes to `logs\helper.log`, falls back to `video-redline-helper.log` in the temp folder, and says in its message which file it really wrote. When `helper_launcher.pyw` is missing, it logs that as the reason. It ignores its command line.
+- `add-desktop-icon-windows.bat` draws the picture `video-redline.ico` (a blue round play button in six sizes, 16 to 256 pixels, each one a PNG inside the .ico container, written byte by byte by the PowerShell part at the end of the file) and makes the two shortcuts `Video Redline.lnk` (Desktop and Start menu). It replaces `Video Review.lnk` of an earlier version, but only if that shortcut starts `open_video_review.pyw`; a `Video Review.lnk` that cannot be read (another program has it open) is left alone and named in a message. It does not delete the old picture `video-review.ico` (a copy of the icon somewhere else may still use it); `remove-autostart-windows.bat` deletes both pictures. If the picture cannot be saved it still makes the shortcuts (with the older picture, or the default one), and it says in plain words which folders got an icon and which did not. Its exit code is 0 when at least one icon exists and 1 when none could be made (`setup-autostart-windows.bat` reads it to decide what its closing text says).
+- `remove-autostart-windows.bat` removes only shortcuts, under both names, whose command contains `open_video_review.pyw`. When a deletion fails, or a shortcut cannot be read because another program has it open, it says so and does not delete the picture (exit code 10 from its PowerShell part).
+
+## Test-only settings
+
+- The environment variable `VRT_ICON_DIR` makes both icon scripts use the folders `%VRT_ICON_DIR%\Desktop` and `%VRT_ICON_DIR%\Programs` instead of the real Desktop and Start menu (a folder that does not exist counts as "not found"). Nobody needs it otherwise, and without it nothing changes.
+- `VRT_NO_PAUSE=1` skips the "press any key" pauses. `VRT_PORT=47899` moves the helper's first connection number (the setup file and the icon then look there).
+
+## Switches
+
+`setup-autostart-windows.bat /yes` (no question), `/dryrun` (check only, change nothing), `/allow-sync` (go on inside a synced folder), `/allow-shared` (go on when other accounts can change the folder); `remove-autostart-windows.bat /yes`; `add-desktop-icon-windows.bat /quiet`.
+
+## The page side
+
+It lives in `src/js/08-cleanup.js` (`makeHelperAutostart`). The page does **not** start the helper. With no helper, its help card sends the person to the Video Redline icon. The wrapper words the help cards for a hidden helper (there is no helper window: they say how to stop it and that the icon starts it again), counts a helper that is still checking its speech tools as ready (`run()` waits for it), and, while a transcript is made, asks the helper every 2.5 seconds and ends the run as a lost connection after three immediate "nobody there" answers in a row (about 7 to 8 seconds). The client alone says "Lost contact with the helper" after about 2 seconds and gives up after about 17, so this only shortens the second part. The panel turns every sentence of a help text into one numbered step, so the page's own help texts are written as one thing to do per sentence. The code that once asked Windows to start the helper (the link `videoreview://start`, clicked through a hidden `<a id="vrtHelperLaunch">`) is **switched off and unused in real use**: it runs only when a test sets `window.__vrtHelperSeam.launchFromPage = true`, and it is marked as such in the file. For tests, `window.__vrtHelperSeam` can also turn the wrapper off or move the waits (`launchFromPage`, `launch`, `link`, `windows`, `anyPage`, `off`, `waitMs`, `retryMs`, `forgetMs`, `pollMs`, `gapMs`, `beatMs`, `quickMs`).
+
+## Taking the start-up entry out by hand
+
+If the folder is gone for good and you cannot run `remove-autostart-windows.bat` from a copy of it: press the Windows key, type `cmd` and press Enter. A black window opens. Paste these three lines, one at a time (right-click inside the window to paste), and press Enter after each:
+
+```
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v VideoReviewHelper /f
+reg delete "HKCU\Software\Classes\videoreview" /f
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" /v VideoReviewHelper /f
+```
+
+The second and third lines may say they found nothing. That is fine: the second one is only for the old link that earlier versions added. The icons are ordinary files: delete them like any other icon. If you are not sure, ask the person who invited you to the beta instead.

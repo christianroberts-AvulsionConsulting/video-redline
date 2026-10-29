@@ -1,0 +1,34 @@
+# Pinned versions. These exact versions were installed and tested together on Windows 11 with Python 3.12.16.
+# setup-windows.bat and setup-mac.command install exactly this list.
+#
+# The five packages the helper actually uses:
+onnx-asr==0.12.0          # runs NVIDIA Parakeet through ONNX Runtime (no PyTorch)
+faster-whisper==1.2.1     # runs OpenAI Whisper through CTranslate2 (int8 on the CPU)
+av==19.0.2                # PyAV: reads any video/audio file, ffmpeg is built in (nothing else to install)
+numpy==2.5.4              # audio measurements
+huggingface-hub==2.3.0    # downloads the models once
+
+# Their dependencies, pinned so a later release cannot change behaviour:
+# ONNX Runtime 1.31.1 is what was tested (Windows). Its Mac build only exists for Apple Silicon on macOS 14 or newer,
+# so Intel Macs get 1.23.2, which is the newest build that still has an Intel Mac version. That combination is UNTESTED.
+onnxruntime==1.31.1; sys_platform != "darwin" or platform_machine == "arm64"
+onnxruntime==1.23.2; sys_platform == "darwin" and platform_machine == "x86_64"
+ctranslate2==4.8.4
+tokenizers==0.23.3
+anyio==4.15.1
+click==8.5.0
+colorama==0.4.6
+filelock==4.2.4
+flatbuffers==25.12.19
+fsspec==2026.9.0
+h11==0.16.0
+hf-xet==1.7.0
+httpcore2==2.16.0
+httpx2==2.16.0
+idna==3.20
+packaging==26.3
+protobuf==7.36.2
+pyyaml==6.0.3
+tqdm==4.70.1
+truststore==0.10.5
+typing-extensions==4.16.0

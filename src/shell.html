@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Redline</title>
+<style>
+/*{{CSS}}*/
+</style>
+</head>
+<body>
+<!--{{ICONS}}-->
+<div class="app" id="app">
+
+  <!-- ============ Top bar ============ -->
+  <header class="topbar">
+    <div class="brand"><span class="logo" data-icon="film"></span><b>Video Redline</b></div>
+    <div class="fileinfo" id="fileinfo"><span class="dim">No video open yet</span></div>
+    <span class="grow"></span>
+    <button class="btn icon ghost" id="btnUndo" data-icon="undo" title="Undo" disabled></button>
+    <button class="btn icon ghost" id="btnRedo" data-icon="redo" title="Redo" disabled></button>
+    <span class="vsep"></span>
+    <button class="btn" id="btnOpen" data-icon="folder-open" title="Open a video" aria-label="Open video"><span class="lbl">Open video</span></button>
+    <button class="btn ghost" id="btnFile" data-icon="chevron-down" aria-haspopup="menu" title="File menu: save or load a session" aria-label="File menu"><span class="lbl">File</span></button>
+    <button class="btn" id="btnCopy" data-icon="copy" title="Copy the markdown notes to the clipboard"><span class="lbl">Copy markdown</span></button>
+    <button class="btn primary" id="btnExport" data-icon="download" title="Download the markdown and JSON files for Claude"><span class="lbl">Export for Claude</span></button>
+    <span class="vsep"></span>
+    <button class="btn icon ghost" id="btnPanelL" data-icon="panel-left" title="Show or hide the left panel"></button>
+    <button class="btn icon ghost" id="btnPanelR" data-icon="panel-right" title="Show or hide the properties panel"></button>
+    <input type="file" id="fileVideo" accept="video/*,.mp4,.mov,.m4v,.webm" hidden>
+    <input type="file" id="fileSession" accept=".json,application/json" hidden>
+    <input type="file" id="fileCam" accept=".xml,text/xml,application/xml" hidden>
+    <input type="file" id="fileStyle" accept=".md,.css,.json,text/markdown,text/css,application/json" multiple hidden>
+    <input type="file" id="fileLib" accept=".json,application/json" hidden>
+  </header>
+
+  <!-- ============ Left panel: Cleanup | Markers | Styles | Visuals ============ -->
+  <aside class="panel left" id="leftPanel">
+    <div class="tabs" role="tablist" aria-label="Left panel">
+      <button class="tab active" id="tabCleanup" data-tab="cleanup" data-icon="scissors" role="tab" aria-selected="true" aria-controls="paneCleanup" title="Audio cleanup: find dead air, ums and stutters from a transcript"><span>Cleanup</span><i class="badge" id="cleanupBadge" hidden>0</i></button>
+      <button class="tab" id="tabMarkers" data-tab="markers" data-icon="layers" role="tab" aria-selected="false" aria-controls="paneMarkers" title="Markers"><span>Markers</span><i class="badge" id="countBadge">0</i></button>
+      <button class="tab" id="tabStyles" data-tab="styles" data-icon="palette" role="tab" aria-selected="false" aria-controls="paneStyles" title="Styles: the look of a visual"><span>Styles</span></button>
+      <button class="tab" id="tabVisuals" data-tab="visuals" data-icon="sparkles" role="tab" aria-selected="false" aria-controls="paneVisuals" title="Visuals: your saved designs"><span>Visuals</span></button>
+    </div>
+    <div class="pane active" id="paneCleanup" role="tabpanel" aria-labelledby="tabCleanup"><div class="pane-body" id="cleanupScroll"><div id="cleanupHost"></div></div></div>
+    <div class="pane" id="paneMarkers" role="tabpanel" aria-labelledby="tabMarkers">
+      <div class="pane-body" id="list"></div>
+      <div class="empty" id="emptyMsg">
+        <span class="empty-ic" data-icon="marker"></span>
+        <b>No markers yet</b>
+        <p>Press <kbd>M</kbd> to drop one at the playhead, or drag along a timeline track to mark a stretch.</p>
+      </div>
+    </div>
+    <div class="pane" id="paneVisuals" role="tabpanel" aria-labelledby="tabVisuals"></div>
+    <div class="pane" id="paneStyles" role="tabpanel" aria-labelledby="tabStyles"></div>
+  </aside>
+
+  <!-- ============ Centre: video + transport ============ -->
+  <main class="canvasArea" id="canvasArea">
+    <div class="stageWrap" id="stageWrap">
+      <div class="stage" id="stage" hidden>
+        <video id="video" playsinline preload="auto"></video>
+        <div class="overlay" id="overlay"></div>
+      </div>
+      <div class="drop" id="drop">
+        <span class="drop-ic" data-icon="film"></span>
+        <h2>Drop your video here</h2>
+        <p>Or choose a file. The video stays on your computer and nothing is uploaded. If you worked on this video before, open the same file again and your markers come back.</p>
+        <button class="btn primary big" id="btnOpen2" data-icon="folder-open"><span class="lbl">Open video</span></button>
+        <p class="dim" id="lastSeen"></p>
+      </div>
+      <button class="chip-toggle" id="btnPreview" data-icon="eye" title="Show the styled visuals on the video" hidden><span class="lbl">Preview visuals</span></button>
+    </div>
+    <div class="transport" id="transport">
+      <div class="tc" id="clock"><span class="tc-main">0:00.00</span><span class="tc-sub">/ 0:00.00 · frame 0</span></div>
+      <div class="tp-center">
+        <button class="btn icon ghost" id="bBack1s" data-icon="skip-back" title="Back one second (Shift + ←)"></button>
+        <button class="btn icon ghost" id="bBack" data-icon="frame-back" title="Back one frame (←)"></button>
+        <button class="btn primary round" id="bPlay" data-icon="play" title="Play or pause (Space)"></button>
+        <button class="btn icon ghost" id="bFwd" data-icon="frame-fwd" title="Forward one frame (→)"></button>
+        <button class="btn icon ghost" id="bFwd1s" data-icon="skip-fwd" title="Forward one second (Shift + →)"></button>
+      </div>
+      <label class="speed">Speed
+        <select id="speed">
+          <option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option>
+        </select>
+      </label>
+    </div>
+  </main>
+
+  <!-- ============ Right panel: properties of the selected marker ============ -->
+  <aside class="panel right" id="rightPanel">
+    <div class="panel-head"><span data-icon="settings"></span><b id="propTitle">Properties</b></div>
+    <div class="pane-body" id="props"></div>
+  </aside>
+
+  <div class="splitter" id="splitter" title="Drag to make the timeline taller or shorter"><i></i></div>
+
+  <!-- ============ Timeline ============ -->
+  <section class="timeline" id="timeline">
+    <div class="tl-toolbar">
+      <button class="btn primary sm" id="bMark" data-icon="marker" title="Add a marker at the playhead (M)"><span class="lbl">Add marker</span><kbd>M</kbd></button>
+      <button class="btn sm" id="bIn" data-icon="in-point" title="Set the in point at the playhead (I)"><span class="lbl">In</span><kbd>I</kbd></button>
+      <button class="btn sm" id="bOut" data-icon="out-point" title="Set the out point at the playhead (O)"><span class="lbl">Out</span><kbd>O</kbd></button>
+      <span class="inout">In <b id="inVal">—</b> Out <b id="outVal">—</b></span>
+      <button class="btn icon sm ghost" id="bClearIO" data-icon="x" title="Clear the in and out points" hidden></button>
+      <button class="btn sm" id="bSkip" data-icon="scissors" title="While playing, jump over the cut markers so you hear the video as it will sound after the cuts"><span class="lbl">Skip cuts</span></button>
+      <span class="grow"></span>
+      <button class="btn sm ghost" id="zSel" data-icon="box" title="Zoom in on the selected marker"><span class="lbl">Zoom to marker</span></button>
+      <button class="btn sm ghost" id="zFit" data-icon="fit" title="Show the whole video (0)"><span class="lbl">Fit all</span></button>
+      <button class="btn icon sm ghost" id="zOut" data-icon="zoom-out" title="Zoom out (-)"></button>
+      <input type="range" id="zSlider" min="0" max="1000" value="0" step="1" aria-label="Timeline zoom">
+      <button class="btn icon sm ghost" id="zIn" data-icon="zoom-in" title="Zoom in (+)"></button>
+      <span class="zv" id="zVal">1×</span>
+    </div>
+    <div class="tl-scroll" id="strip">
+      <div class="tl-inner" id="tlInner">
+        <div class="tl-corner"><span data-icon="layers"></span>Tracks</div>
+        <div class="tl-ruler" id="ruler"><div class="io-layer" id="ioLayer"></div><div class="ph-head" id="phHead"></div></div>
+        <div class="tl-heads" id="heads"></div>
+        <div class="axis" id="axis">
+          <div class="lanes" id="lanes"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Status bar: shortcuts are always fully visible ============ -->
+  <footer class="statusbar">
+    <div class="hints" id="hints"></div>
+    <span class="ver" id="appVer" title="Video Redline version {{VERSION}}">{{VERSION}}</span>
+    <button class="btn sm ghost" id="btnKeys" data-icon="keyboard"><span class="lbl">All shortcuts</span><kbd>?</kbd></button>
+  </footer>
+</div>
+
+<div id="modalRoot"></div>
+<div id="popRoot"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<!--{{DATA}}-->
+<script>
+(() => {
+'use strict';
+/*{{JS}}*/
+})();
+</script>
+</body>
+</html>
