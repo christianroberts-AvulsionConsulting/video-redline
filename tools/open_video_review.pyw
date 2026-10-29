@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Video Redline - open the tool and make sure its helper is running (Windows, no window, no administrator rights).
+"""Video Redline - open the tool and make sure its helper is running (Windows and Mac, no window, no administrator rights).
 
-This is what the "Video Redline" icon on the Desktop and in the Start menu runs. One click does everything:
+This is what the "Video Redline" icon on the Desktop and in the Start menu runs on Windows, and what the "Video Redline" app runs on a
+Mac (open-video-redline-mac.command starts this file with the private Python in tools/venv/bin). One click does everything:
   1. it looks for a helper on the helper's five connection numbers, all at the same time (about a third of a second);
   2. if none answers, it starts the helper (hidden, the same way Windows does at sign-in) and waits for it;
   3. it opens video-redline.html (the file next to the tools folder) in your web browser.
@@ -18,7 +19,9 @@ in the tools folder (or, if that folder cannot be written, to video-redline-help
 A second double-click while the first is still working does nothing, so one click never opens two browser tabs.
 
 Run it with the private Python of this folder:
-    venv\\Scripts\\pythonw.exe -E -X utf8 open_video_review.pyw
+    venv\\Scripts\\pythonw.exe -E -X utf8 open_video_review.pyw        (Windows)
+    venv/bin/python -E -X utf8 open_video_review.pyw                   (Mac; the Mac only differs in how it starts the helper
+                                                                         detached, opens the page and shows a box: all marked IS_WIN below)
 """
 import http.client
 import json
@@ -44,13 +47,15 @@ DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 MUTEX_NAME = "Local\\VideoReviewOpener-%08x" % (zlib.crc32(TOOLS.lower().encode("utf-8", "replace")) & 0xFFFFFFFF)   # one per tools folder
 TITLE = "Video Redline"
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
 _log_file = None                                           # the log file that was really written
 
 
 def _log_paths():
     """logs\\helper.log in the tools folder first; if that folder cannot be written, the temp folder (as the helper does)."""
     paths = [os.path.join(TOOLS, "logs", "helper.log")]
-    temp = os.environ.get("TEMP") or os.environ.get("TMP")
+    temp = os.environ.get("TEMP") or os.environ.get("TMP") or os.environ.get("TMPDIR")
     if temp:
         paths.append(os.path.join(temp, "video-redline-helper.log"))
     return paths
@@ -120,10 +125,13 @@ def _helper_up(limit=None):
 
 def _start_helper():
     """Start the hidden helper, detached from this process (it must keep running after this one ends). Returns the process, or None."""
+    if IS_WIN:
+        detach = {"creationflags": DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP}
+    else:
+        detach = {"start_new_session": True}                # a session of its own: it keeps running after the Mac app has ended
     try:
-        return subprocess.Popen([sys.executable, "-E", "-X", "utf8", LAUNCHER], cwd=TOOLS,
-                                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, close_fds=True,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return subprocess.Popen([sys.executable, "-E", "-X", "utf8", LAUNCHER], cwd=TOOLS, close_fds=True,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **detach)
     except OSError as e:
         _log("Could not start the helper: %r" % (e,))
         return None
@@ -158,6 +166,21 @@ def _wait_for_helper(proc, started, limit):
 
 def _take_lock():
     """(True, handle) if this is the only opener running. (False, None) if another one is: the first click is already doing the work."""
+    if not IS_WIN:
+        try:
+            import fcntl
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(),
+                                "video-redline-opener-%08x.lock" % (zlib.crc32(TOOLS.encode("utf-8", "replace")) & 0xFFFFFFFF))
+            handle = open(path, "a")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)    # let go by itself when this process ends, however it ends
+            except OSError:
+                handle.close()
+                return False, None
+            return True, handle
+        except Exception:
+            return True, None
     try:
         import ctypes
         k32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -177,6 +200,12 @@ def _take_lock():
 
 
 def _release_lock(handle):
+    if handle and not IS_WIN:
+        try:
+            handle.close()
+        except Exception:
+            pass
+        return
     if handle:
         try:
             import ctypes
@@ -188,7 +217,17 @@ def _release_lock(handle):
 
 
 def _say(text):
-    """A plain Windows message box (there is no console)."""
+    """A plain message box (there is no console): a Windows one, or on a Mac a dialog from osascript (the text travels as an argument,
+    so no character in it needs escaping)."""
+    if not IS_WIN:
+        try:
+            subprocess.run(["osascript", "-e", "on run argv",
+                            "-e", 'display dialog (item 1 of argv) with title (item 2 of argv) buttons {"OK"} default button "OK" with icon note',
+                            "-e", "end run", text, TITLE],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
     try:
         import ctypes
         ctypes.windll.user32.MessageBoxW(0, text, TITLE, 0x40 | 0x1000)   # information icon, on top
@@ -207,11 +246,17 @@ def _find_page():
 
 
 def _open_page(page):
-    """Open the page the way a double-click does (in your web browser). True if Windows accepted it."""
+    """Open the page the way a double-click does (in your web browser). True if Windows (or the Mac's "open") accepted it."""
     try:
-        os.startfile(page)
+        if IS_WIN:
+            os.startfile(page)
+            return True
+        done = subprocess.run(["open" if IS_MAC else "xdg-open", page], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, timeout=30)
+        if done.returncode != 0:
+            raise OSError("exit code %d" % done.returncode)
         return True
-    except OSError as e:
+    except (OSError, subprocess.SubprocessError) as e:
         _log("Could not open the page: %r" % (e,))
         return False
 
@@ -223,10 +268,11 @@ def _helper_message(why):
                 "transcripts (the helper) cannot start.\n\nPlease copy the complete tools folder again (all of its files together) "
                 "into the Video Redline folder.")
     text = ("Video Redline opened, but the part that makes transcripts (the helper) could not start, so \"Create transcript\" "
-            "will not work yet.\n\nPlease restart your computer, then click the Video Redline icon again.")
+            "will not work yet.\n\nPlease restart your computer, then "
+            + ("click the Video Redline icon again." if IS_WIN else "open the Video Redline app again."))
     if _log_file is None or _log_file != _log_paths()[0]:
         text += ("\n\nVideo Redline cannot save files in its own folder:\n" + TOOLS + "\nPlease ask the person who invited you to the beta, or "
-                 "whoever installed it, to give your Windows account permission to change that folder.")
+                 "whoever installed it, to give your " + ("Windows" if IS_WIN else "Mac user") + " account permission to change that folder.")
     if _log_file:
         text += "\n\nIf it still does not work, please send this file to the person who invited you to the beta:\n" + _log_file
     else:
@@ -277,7 +323,7 @@ def main():
         opened = _open_page(page)
     _release_lock(lock)                               # before any box below: a box waits for a click, and must not block the next icon click
     if not opened:
-        _say("Windows could not open Video Redline in your web browser.\n\nPlease open it yourself: double-click this file:\n\n" + page)
+        _say(("Windows" if IS_WIN else "The Mac") + " could not open Video Redline in your web browser.\n\nPlease open it yourself: double-click this file:\n\n" + page)
         return 1
     if not up:
         _say(_helper_message(why))

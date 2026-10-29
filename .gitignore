@@ -22,3 +22,6 @@ tools/*.ico
 tools/logs/
 tools/__pycache__/
 /dist/
+
+# The small Mac launcher app that setup-mac.command makes on a person's Mac (add-launcher-mac.command)
+/Video Redline.app/

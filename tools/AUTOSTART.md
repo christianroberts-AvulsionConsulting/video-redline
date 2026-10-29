@@ -4,7 +4,7 @@
 
 The helper is the small program on your own computer that makes transcripts. Without this page you have to start it yourself, every time, and leave a window open. With it, after one set-up, **you open Video Redline from its icon and "Create transcript and find cuts" works.**
 
-This is for **Windows**. On a Mac the helper still has to be started by hand (`start-helper-mac.command`). The automatic start for Mac is not built yet.
+This is for **Windows**. A Mac does not start the helper when you log in. Instead, `setup-mac.command` makes a small app called **Video Redline** in your Video Redline folder: double-click it, and it starts the helper if it is not running and then opens the page (see "Using the one-click button" in `README.md`, this folder). `stop-helper-mac.command` stops the helper again.
 
 ## The easy way: the "Video Redline" icon
 

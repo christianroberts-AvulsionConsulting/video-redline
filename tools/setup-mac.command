@@ -231,7 +231,7 @@ if [ ! -d "$TOOLS/hf-cache/hub" ]; then
 fi
 
 # ---- step 1: uv -----------------------------------------------------------------------------
-echo " [1 of 6] Getting the small installer (uv, about 15 MB, from github.com) ..."
+echo " [1 of 7] Getting the small installer (uv, about 15 MB, from github.com) ..."
 if [ ! -x "$UV" ]; then
     mkdir -p "$TOOLS/uv" || fail "I could not create a folder here." "Make sure this folder is not read-only (move it to ~/VideoRedline, a folder called VideoRedline in your home folder)."
     curl -L --fail --silent --show-error --retry 3 -o "$TOOLS/uv/uv-download.tar.gz" "$UV_URL" ||
@@ -252,7 +252,7 @@ echo "       done."
 
 # ---- step 2: python -------------------------------------------------------------------------
 echo
-echo " [2 of 6] Getting a private copy of Python (about 25 MB, from github.com) ..."
+echo " [2 of 7] Getting a private copy of Python (about 25 MB, from github.com) ..."
 # (when the folder was moved, this also repairs the python/cpython-3.12-... link that pointed at the old place)
 "$UV" python install 3.12 --no-bin ||
     fail "A download failed." "Check your internet connection (and that no VPN or firewall blocks github.com or githubusercontent.com), then run this file again."
@@ -260,7 +260,7 @@ echo "       done."
 
 # ---- step 3: virtual environment ------------------------------------------------------------
 echo
-echo " [3 of 6] Preparing the working space ..."
+echo " [3 of 7] Preparing the working space ..."
 NEED_VENV=1
 # -L as well as -e: after the folder was moved, venv/bin/python is a link to the old place that leads nowhere
 if [ -e "$PY" ] || [ -L "$PY" ]; then
@@ -284,7 +284,7 @@ echo "       done."
 
 # ---- step 4: packages -----------------------------------------------------------------------
 echo
-echo " [4 of 6] Installing the speech tools (about 100 MB download from pypi.org) ..."
+echo " [4 of 7] Installing the speech tools (about 100 MB download from pypi.org) ..."
 "$UV" pip install --python "$PY" -r "$TOOLS/requirements.txt" ||
     fail "A download or install failed." "Check your internet connection (and that no VPN or firewall blocks pypi.org or pythonhosted.org) and run this file again. If it keeps failing, ask the person who invited you to the beta for help."
 # Can every package really start on this Mac? Finding out now saves the 1.1 GB model download below.
@@ -294,7 +294,7 @@ echo "       done."
 
 # ---- step 5: models -------------------------------------------------------------------------
 echo
-echo " [5 of 6] Downloading the speech models from huggingface.co. This is the big one: about 1.1 GB, once."
+echo " [5 of 7] Downloading the speech models from huggingface.co. This is the big one: about 1.1 GB, once."
 echo "          A progress bar is shown for each file. If it stops, run this file again:"
 echo "          it continues where it left off. Models that are already complete are not downloaded again."
 echo
@@ -303,9 +303,19 @@ echo
 
 # ---- step 6: self-test ----------------------------------------------------------------------
 echo
-echo " [6 of 6] Quick self-test ..."
+echo " [6 of 7] Quick self-test ..."
 "$PY" "$TOOLS/transcribe.py" --self-test ||
     fail "The self-test did not pass." "Run this file once more. If it fails again, send the file logs/last-error.txt (in this folder) to the person who invited you to the beta."
+
+# ---- step 7: the Video Redline app ----------------------------------------------------------
+# A web page cannot start a program, so this small app (made right here, nothing is downloaded) starts the helper and opens the page.
+# If it cannot be made, setup is still complete: the helper can be started by hand with start-helper-mac.command.
+echo
+echo " [7 of 7] Making the \"Video Redline\" app (it starts the helper and opens the page) ..."
+LAUNCHER_OK=""
+if bash "$TOOLS/add-launcher-mac.command" --quiet; then
+    LAUNCHER_OK=1
+fi
 
 # ---- tidy up --------------------------------------------------------------------------------
 rm -rf "$TOOLS/uv-cache" 2>/dev/null
@@ -319,10 +329,19 @@ echo
 echo " ====================================================================="
 echo "  ALL DONE. Setup is finished and the self-test passed."
 echo
-echo "  To use the \"Create transcript and find cuts\" button in Video Redline:"
-echo "  on a Mac, open Terminal, type bash and a space, drag \"start-helper-mac.command\""
-echo "  (in this same folder) into the window, then press Return. Leave that window"
-echo "  open while you work in Video Redline."
+if [ -n "$LAUNCHER_OK" ]; then
+    echo "  To use Video Redline, double-click the \"Video Redline\" app. It is in your"
+    echo "  Video Redline folder, next to video-redline.html. Open Video Redline with it"
+    echo "  instead of double-clicking video-redline.html: it starts the helper (the part"
+    echo "  that makes transcripts) if it is not running, and opens the page. Then the"
+    echo "  \"Create transcript and find cuts\" button works. Drag the app into your Dock"
+    echo "  to keep it at hand. To stop the helper: run stop-helper-mac.command."
+else
+    echo "  The \"Video Redline\" app could not be made (see the message above). Without it,"
+    echo "  to use the \"Create transcript and find cuts\" button: open Terminal, type bash"
+    echo "  and a space, drag \"start-helper-mac.command\" (in this same folder) into the"
+    echo "  window, then press Return. Leave that window open while you work in Video Redline."
+fi
 echo
 echo "  Or, without the button: open Terminal, type bash and a space, drag"
 echo "  \"transcribe-mac.command\" into the window, type another space, drag your"

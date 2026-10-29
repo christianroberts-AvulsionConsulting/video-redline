@@ -1071,7 +1071,7 @@ class MacVersionCheckTests(unittest.TestCase):
             self.assertIn("WHAT TO DO: Update macOS to version 14 or newer (Apple menu, then System Settings, General, Software Update; "
                           "on macOS 12 and older it is System Preferences, Software Update)", flat)
             self.assertIn("tell the person who invited you to the beta", flat)
-            self.assertNotIn("[1 of 6]", out)                                            # stopped before the first step
+            self.assertNotIn("[1 of 7]", out)                                            # stopped before the first step
             self.assertNotIn("stub curl", out)
             self.assertFalse(os.path.exists(os.path.join(self.tools, "uv")))
 
@@ -1083,14 +1083,14 @@ class MacVersionCheckTests(unittest.TestCase):
         self.assertIn("The speech tools for an Intel Mac need macOS 13 or newer (that is what their files say; nobody has tried them on an Intel Mac yet)", flat)
         self.assertIn("Update macOS to version 13 or newer if your Mac offers it", flat)
         self.assertIn("this beta has no version of them for an older macOS", flat)
-        self.assertNotIn("[1 of 6]", out)
+        self.assertNotIn("[1 of 7]", out)
 
     def test_new_enough_or_unknown_versions_go_on_to_step_1(self):
         if cloud_named(self.root):
             self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
         for arch, version in (("arm64", "14.0"), ("arm64", "15.1"), ("arm64", "26.0"), ("x86_64", "13.0"), ("arm64", "none"), ("arm64", "garbage")):
             code, out, flat = self.run_setup(arch, version)
-            self.assertIn("[1 of 6]", out, (arch, version, out))                         # went on, and only the stand-in curl said no
+            self.assertIn("[1 of 7]", out, (arch, version, out))                         # went on, and only the stand-in curl said no
             self.assertNotIn("too old", flat, (arch, version))
             self.assertIn("stub curl was called", out)
 
@@ -1103,13 +1103,13 @@ class MacVersionCheckTests(unittest.TestCase):
         self.assertIn("PROBLEM: The drive this folder is on has only about 500 MB free. Setup needs about 2 GB (it downloads 1.3 GB). Nothing was downloaded.", flat)
         self.assertEqual(flat.count("has only about 500 MB free"), 1, out)                    # said once, not again as a NOTE
         self.assertIn("WHAT TO DO: Free up some space on that drive (empty the Trash, delete files you do not need), then run this file again.", flat)
-        self.assertNotIn("[1 of 6]", out)
+        self.assertNotIn("[1 of 7]", out)
         code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="2048")
-        self.assertIn("[1 of 6]", out)
+        self.assertIn("[1 of 7]", out)
         self.assertNotIn("has only about", flat)
         os.makedirs(os.path.join(self.tools, "hf-cache", "hub"))
         code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="300")
-        self.assertIn("[1 of 6]", out)                                                         # skipped: the models are there
+        self.assertIn("[1 of 7]", out)                                                         # skipped: the models are there
         self.assertIn("PROBLEM: A download failed.", flat)
         self.assertIn("NOTE: the drive this folder is on has only about 300 MB free. A nearly full drive makes things fail: free up some space (setup needs about 2 GB), then run this file again.", flat)
         code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="lots")

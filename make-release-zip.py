@@ -55,7 +55,8 @@ MUST_HAVE = ["video-redline.html", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.
              "tools/stop-helper-windows.bat", "tools/remove-autostart-windows.bat", "tools/start-helper-windows.bat",
              "tools/helper_launcher.pyw", "tools/open_video_review.pyw", "tools/vrt_server.py", "tools/transcribe.py",
              "tools/requirements.txt", "tools/AUTOSTART.md", "tools/README.md", "tools/setup-mac.command",
-             "tools/start-helper-mac.command"]
+             "tools/start-helper-mac.command", "tools/add-launcher-mac.command", "tools/open-video-redline-mac.command",
+             "tools/stop-helper-mac.command"]
 
 
 def die(message):
