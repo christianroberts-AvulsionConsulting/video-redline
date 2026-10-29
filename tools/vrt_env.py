@@ -54,8 +54,28 @@ def describe_import_failure(exc, what):
     return ("%s is not installed correctly." % what, "Please run the setup file again.")
 
 
+def switch_off_ort_telemetry(rt=None):
+    """Ask Microsoft's ONNX Runtime not to report usage, as far as it can be asked.
+
+    ORT_DISABLE_TELEMETRY=1 (set here, and by every launcher and by the helper for its child processes) stops the reporting over the
+    internet of the builds that have it: read from the wheels, that is the Apple Silicon Mac build; the Windows build uses Windows' own
+    event system and ignores the variable, and the Intel Mac build 1.23.2 has no reporting on a Mac. With the module `rt` (already
+    imported) this also calls its own disable_telemetry_events(), which is what holds back the optional events of the Windows build.
+    Returns True when that call worked. It never raises.
+    """
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"
+    if rt is None:
+        return False
+    try:
+        rt.disable_telemetry_events()
+        return True
+    except Exception:
+        return False
+
+
 def check_packages():
     """Import every package the helper needs. Returns None if all load, else (problem, what_to_do) in plain language."""
+    os.environ["ORT_DISABLE_TELEMETRY"] = "1"                   # before onnxruntime is imported below
     for module, what in (("numpy", "The number-crunching part (numpy)"), ("av", "The audio decoder (PyAV)"),
                          ("onnxruntime", "The Parakeet engine runtime (onnxruntime)"),
                          ("onnx_asr", "The Parakeet speech engine (onnx-asr)"),
@@ -65,6 +85,8 @@ def check_packages():
             __import__(module)
         except Exception as e:
             return describe_import_failure(e, what)
+        if module == "onnxruntime":
+            switch_off_ort_telemetry(sys.modules.get("onnxruntime"))
     return None
 
 

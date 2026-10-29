@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Video Redline Tool - transcription helper.
+"""Video Redline - transcription helper.
 
 Turns a video (or audio) file into <name>-transcript.json: every spoken word with its time, plus the quiet gaps
 and the non-word sounds. It runs two open-source speech engines on YOUR computer (nothing is uploaded):
@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import sys
 
-HELPER_VERSION = "1.1.0"
+HELPER_VERSION = "1.1.1"
 FORMAT_VERSION = 1
 
 # ---- keep everything inside this folder, and stay offline unless we are downloading models -------------
@@ -33,6 +33,10 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("DO_NOT_TRACK", "1")
+# Microsoft's ONNX Runtime (the Parakeet part) has usage reporting built in. This variable stops the reporting over the internet of the
+# builds that have it (read from the wheels: the Apple Silicon Mac build); the Windows build ignores it, and there
+# vrt_env.switch_off_ort_telemetry() calls the library's own disable function. Set outright, not with setdefault.
+os.environ["ORT_DISABLE_TELEMETRY"] = "1"
 _DOWNLOAD_MODE = "--download-models" in sys.argv
 if not _DOWNLOAD_MODE:
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -617,7 +621,7 @@ def log_unexpected(exc):
         os.makedirs(logs, exist_ok=True)
         path = os.path.join(logs, "last-error.txt")
         with open(path, "w", encoding="utf-8") as f:
-            f.write("Video Redline Tool transcription helper %s\n%s\n" % (HELPER_VERSION, datetime.datetime.now().isoformat()))
+            f.write("Video Redline transcription helper %s\n%s\n" % (HELPER_VERSION, datetime.datetime.now().isoformat()))
             # only the options (words that start with --) are written: the other arguments are file names, and a file name is the
             # person's own folder and video name, which this file (people are asked to send it) does not need
             opts = [a for a in sys.argv[1:] if a.startswith("--")]
@@ -664,6 +668,10 @@ def main(argv=None):
         say("PROBLEM: " + str(e))
         if e.hint:
             say("WHAT TO DO: " + e.hint)
+        if args.self_test:                         # setup asks a person to send logs/last-error.txt when the self-test fails
+            note = log_unexpected(e)
+            if note:
+                say("A technical note was saved here: %s" % note)
         return e.code
     except KeyboardInterrupt:
         say("")

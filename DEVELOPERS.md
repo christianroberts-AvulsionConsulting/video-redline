@@ -47,7 +47,7 @@ Before you announce a release, run `node build.js --check` (it says whether `vid
 
 Things worth knowing:
 
-- The speech models are fetched at set-up from the newest version of each model page. The licences in `THIRD-PARTY-NOTICES.md` are for the revisions listed there; read the model pages again before a wide public release.
+- The speech models are pinned: `MODEL_REVISIONS` in `tools/vrt_engines.py` holds a full commit for each repository, and the set-up downloads exactly those. The licences in `THIRD-PARTY-NOTICES.md` are for those revisions. To move to a newer model, change the commit there and in `THIRD-PARTY-NOTICES.md`, and read the model page again first.
 - The 152 style presets carry real brand names as labels for rough look-alikes (the **Styles** tab says so). The button text "Export for Claude" and the preset "Claude (Anthropic)" use Anthropic's name in the same way.
 - The name "Video Redline" has had a web search only, not a trademark search. Do one before a wide public launch.
 - Not read one by one: the small libraries inside the `av` package, the Intel and NVIDIA files inside the `ctranslate2` package, and the licences of the training data behind the models.

@@ -33,7 +33,7 @@ import unittest
 from unittest import mock
 
 import _paths
-from _paths import REAL, SCRATCH, TOOLS, NO_BASH, cloud_named, find_bash
+from _paths import REAL, SCRATCH, TOOLS, NO_BASH, cloud_named, find_bash, module_file
 
 WIN = sys.platform.startswith("win")
 MAC_RECIPE = "On a Mac: open Terminal, type bash and a space, drag %s into the window, then press Return."
@@ -1023,13 +1023,14 @@ class BackgroundTextTests(unittest.TestCase):
             hidden = V.explain_failure(1, "", "", "")
         self.assertEqual(normal[0], "failed")
         self.assertEqual(hidden[0], "failed")
-        self.assertIn("helper window text", normal[1])
+        self.assertIn("logs/last-error.txt", normal[1])                          # (round 3e: it only promises what exists)
         self.assertNotIn("window", hidden[1])
         self.assertIn("logs folder", hidden[1])
+        self.assertNotIn("shows what happened", normal[1] + hidden[1])
 
     def test_the_banner_texts_in_the_source_are_the_old_ones_and_the_new_ones(self):
         src = read_text("vrt_server.py")
-        for old in ("Video Redline helper is running.", "Leave this window open. Go back to the page and click Create transcript.",
+        for old in ("Video Redline helper is running.", "Leave this window open. Go back to the page and click", "Create transcript and find cuts.",
                     "To stop the helper, close this window.",
                     "Leave this window open: once the speech tools are set up, close this window and start the helper again."):
             self.assertIn(old, src)
@@ -1168,8 +1169,8 @@ class LauncherTextTests(unittest.TestCase):
             self.assertLess(len(text), 200)
         self.assertEqual(slow[1], "Checking the speech tools took too long. The computer may be busy with other programs.")
         self.assertEqual(rd2.problem, "I could not check the speech tools just now.")
-        client = os.path.join(REAL, "..", "transcriber-client.js")                      # (the client still recognises the older wording too)
-        if os.path.isfile(client):
+        client = module_file("transcriber-client.js")                                   # (the client still recognises the older wording too)
+        if client:
             with open(client, "rb") as f:
                 js = f.read().decode("utf-8")
             for words in ("took too long", "could not check the speech tools", "try starting the helper again"):
@@ -1239,7 +1240,7 @@ class LauncherTextTests(unittest.TestCase):
         readme = read_text("README.md")
         with mock.patch.object(V, "IS_WIN", True), mock.patch.object(V, "SETUP_FILE", "setup-windows.bat"):
             sentence = V.stop_first_text()
-            self.assertIn("stop-helper-windows.bat (if your tools folder has that file)", sentence)
+            self.assertIn("double-click stop-helper-windows.bat.", sentence)
             self.assertIn("close its window", sentence)
             self.assertIn(sentence, V.moved_text())
             self.assertLess(V.moved_text().index(sentence), V.moved_text().index("double-click setup-windows.bat"))   # first end it, then repair
@@ -1261,8 +1262,8 @@ class LauncherTextTests(unittest.TestCase):
         clip(problem, 400)). The Windows text had grown to 442 characters, so 'speech models. Then start the helper again.' was lost."""
         V = self.V
         limit = 400
-        panel = os.path.join(REAL, "..", "cleanup-panel.js")
-        if os.path.isfile(panel):
+        panel = module_file("cleanup-panel.js")
+        if panel:
             with open(panel, "rb") as f:
                 m = re.search(r"var lead = [^;]*?clip\([^;]*?, (\d+)\)", f.read().decode("utf-8"))
             self.assertIsNotNone(m, "cleanup-panel.js helpCard no longer cuts the lead with clip(..., N): update this test")
@@ -1347,9 +1348,9 @@ class LauncherTextTests(unittest.TestCase):
         way = section[easy:by_hand]
         for want in ("starts the helper if it is not running", "opens Video Redline",
                      "If there is no such icon yet, double-click **`setup-autostart-windows.bat`** once",
-                     "it adds the icon", "each time you sign in to Windows", "add-desktop-icon-windows.bat",
-                     "if your tools folder does not have `setup-autostart-windows.bat`"):                 # (the file comes with the Video Redline app)
+                     "it adds the icon", "each time you sign in to Windows", "add-desktop-icon-windows.bat"):
             self.assertIn(want, way)
+        self.assertNotIn("tools folder does not have", way)                  # (round 3e: the files are in the download, so no 'if')
         self.assertLess(way.index("double-click the **Video Redline** icon"), way.index("setup-autostart-windows.bat"))
         self.assertNotIn("the easy way (once)", section)
         # (changed in round 6: the host's page does NOT start the helper - "tried and does not work" - so the README may not say it does)
@@ -1380,8 +1381,7 @@ class LauncherTextTests(unittest.TestCase):
 
     def test_the_readme_names_the_switches_a_developer_needs(self):
         readme = read_text("README.md")
-        for word in ("VRT_BACKGROUND", "VRT_PORT_PROBE_S", "syncWarning", "vrt-owner.txt", "stop-helper-windows.bat",
-                     "`.py` and `.pyw` files"):
+        for word in ("VRT_BACKGROUND", "VRT_PORT_PROBE_S", "syncWarning", "vrt-owner.txt", "stop-helper-windows.bat", "MODEL_REVISIONS"):
             self.assertIn(word, readme)
 
     def test_no_text_recommends_the_desktop_or_the_documents_folder(self):
@@ -1427,10 +1427,11 @@ class LauncherTextTests(unittest.TestCase):
             self.assertIn("Press any key to close this window.", read_text(name), name)
 
     def test_the_mac_files_name_the_three_commands_with_their_folder_in_the_chmod_hint(self):
+        # (round 3e: how a maintainer publishes is in DEVELOPERS.md of the repository, not in a README that is in the download)
         text = read_text("README.md")
-        self.assertIn("git update-index --chmod=+x tools/setup-mac.command tools/transcribe-mac.command tools/start-helper-mac.command",
-                      text)
         self.assertNotIn("--chmod=+x setup-mac.command", text)
+        self.assertIn("in the repository on GitHub", text)
+        self.assertNotIn("dev/evaluate.py", text)
 
     def test_both_all_done_screens_explain_the_one_click_button_and_keep_drag_and_drop(self):
         bat = read_text("setup-windows.bat")
@@ -1476,18 +1477,21 @@ class ReadmeButtonSectionTests(unittest.TestCase):
 
     def test_it_quotes_what_the_helper_window_really_says(self):
         server = read_text("vrt_server.py")
-        for said in ("Video Redline helper is running.", "Leave this window open. Go back to the page and click Create transcript.",
-                     "ALREADY RUNNING", "NOT ready yet"):
+        for said in ("Video Redline helper is running.", "ALREADY RUNNING", "NOT ready yet"):
             self.assertIn(said, server)
             self.assertIn(said, self.section)
+        # (round 3e: the banner line is split in two so that it fits an 80-column Terminal; the README quotes the two lines as one sentence)
+        self.assertIn('"Leave this window open. Go back to the page and click",', server)
+        self.assertIn('"Create transcript and find cuts.",', server)
+        self.assertIn("Leave this window open. Go back to the page and click Create transcript and find cuts.", self.section)
         V = _import("vrt_server")
         self.assertEqual(V.DEFAULT_PORTS, (47831, 47832, 47833, 47834, 47835))
         self.assertIn("47831 to 47835", self.section)
 
     def test_it_uses_the_real_names_of_the_page_buttons(self):
-        panel = os.path.join(REAL, "..", "cleanup-panel.js")
-        if not os.path.isfile(panel):
-            self.skipTest("cleanup-panel.js is not next to the tools folder here")
+        panel = module_file("cleanup-panel.js")
+        if not panel:
+            self.skipTest("cleanup-panel.js is neither next to the tools folder nor in src/vendor/ here")
         with open(panel, "rb") as f:
             js = f.read().decode("utf-8")
         for label in ("Create transcript and find cuts", "Check again", "I already have a transcript file", "Open transcript file"):
@@ -1506,9 +1510,9 @@ class ReadmeButtonSectionTests(unittest.TestCase):
         self.assertIn("ALREADY RUNNING (in another window, or running hidden)", self.section)
         i = self.section.index("ALREADY RUNNING")
         bullet = self.section[i:self.section.index("\n- ", i)]
-        for want in ("without a window", "stop-helper-windows.bat", "if your tools folder has that file", "restart the computer",
-                     "closing this window does not stop it"):
+        for want in ("without a window", "stop-helper-windows.bat", "restart the computer", "closing this window does not stop it"):
             self.assertIn(want, bullet)
+        self.assertNotIn("if your tools folder has that file", bullet)
         # that file stops only a helper of its own folder: a helper that runs from another copy of the tools needs the file of that copy
         self.assertIn("only stops a helper that runs from the same tools folder", bullet)
         self.assertIn("more than one copy of the tools", bullet)
@@ -1538,7 +1542,7 @@ class ReadmeButtonSectionTests(unittest.TestCase):
         # the helper that has no window of its own (the hidden start) keeps the short text for its log
         self.assertEqual(V.already_running_lines(True), ["The Video Redline helper is ALREADY RUNNING.",
                                                          "You do not need to start it again. Go back to the Video Redline page",
-                                                         "and click Create transcript."])
+                                                         "and click Create transcript and find cuts."])
         # how to stop the one that runs: named only when the file is there; true for a window and for a hidden helper
         folder = tempfile.mkdtemp(prefix="stop-", dir=SCRATCH)
         self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
@@ -1685,7 +1689,7 @@ class SetupBatAutostartTextTests(unittest.TestCase):
         self.assertIn('set "VRT_NO_PAUSE=1"', called)                                                         # it does not wait for a key in the middle
         self.assertLess(called.index("setlocal"), called.index("call "))
         self.assertLess(called.index("call "), called.index("endlocal"))
-        self.assertIn("title Video Redline Tool - one-time setup", called)
+        self.assertIn("title Video Redline - one-time setup", called)
 
     def test_the_offer_is_a_plain_question_with_no_as_the_default_and_never_in_the_test_paths(self):
         offer = self.part(":autostart_offer", ":in_zip")
@@ -2181,7 +2185,7 @@ class RoundThreeDFolderAdviceTests(unittest.TestCase):
         self.assertIn("`%USERPROFILE%\\VideoRedline`", readme)
         self.assertIn("press the Windows key + R, type `%USERPROFILE%` and press Enter", readme)         # how to get to the user folder
         self.assertIn("use a short place inside your own user folder", readme)                           # the long-path note
-        self.assertIn("so that the tools folder ends up inside `C:\\Users\\<your name>\\VideoRedline`", readme)    # Windows step 1
+        self.assertIn("The tools folder then lies inside `C:\\Users\\<your name>\\VideoRedline`", readme)         # Windows step 1
         self.assertIn("so that the tools folder ends up inside `~/VideoRedline`", readme)                          # the Mac step
         where = readme[readme.index("### Where to put the folder"):readme.index("What is checked, and when:")]
         for want in ("**`C:\\Users\\<your name>\\VideoRedline`**", "`%USERPROFILE%\\VideoRedline`", "**`~/VideoRedline`**",
@@ -2322,7 +2326,7 @@ class RoundThreeDIconFirstTests(unittest.TestCase):
     def test_the_header_of_the_helper_puts_the_icon_before_the_hand_start_and_says_the_page_never_starts_it(self):
         head = read_text("vrt_server.py").split('"""')[1]
         flat = re.sub(r"\s+", " ", head)
-        self.assertIn("the Video Redline page never starts this helper (neither do its buttons Create transcript and Check again)", flat)
+        self.assertIn("the Video Redline page never starts this helper (neither do its buttons Create transcript and find cuts and Check again)", flat)
         for a, b in (("double-click the Video Redline icon on your Desktop", "setup-autostart-windows.bat"),
                      ("setup-autostart-windows.bat", "double-click start-helper-windows.bat"),
                      ("double-click start-helper-windows.bat", "Mac: open Terminal")):
@@ -2369,10 +2373,12 @@ class RoundThreeDIconFirstTests(unittest.TestCase):
     def test_the_banner_the_readme_quotes_is_the_one_the_helper_prints(self):
         server = read_text("vrt_server.py")
         readme = read_text("README.md")
-        for said in ("Video Redline helper is running.", "Video Redline helper is running in the background.",
-                     "Leave this window open. Go back to the page and click Create transcript."):
+        for said in ("Video Redline helper is running.", "Video Redline helper is running in the background."):
             self.assertIn('"%s"' % said, server)
             self.assertIn(said, readme)
+        self.assertIn('"Leave this window open. Go back to the page and click",', server)               # (two lines since round 3e)
+        self.assertIn('"Create transcript and find cuts.",', server)
+        self.assertIn("Leave this window open. Go back to the page and click Create transcript and find cuts.", readme)
         self.assertNotIn("Video Review helper", readme)
         self.assertNotIn("Video Review helper", server)
 
@@ -2392,7 +2398,7 @@ class RoundThreeDNameTests(unittest.TestCase):
         for name in PACKAGE_TEXT_FILES:
             read_text(name).encode("ascii")                                                          # plain characters only
         for must in ("the person who invited you to the beta",):
-            for name in ("README.md", "vrt_server.py", "transcribe.py"):
+            for name in ("README.md", "transcribe.py"):                # (the helper's own failure text leaves that to the client since round 3e)
                 self.assertIn(must, read_text(name), name)
 
     def test_the_failure_texts_of_the_helper_send_a_person_to_whoever_invited_them_to_the_beta(self):
@@ -2402,8 +2408,12 @@ class RoundThreeDNameTests(unittest.TestCase):
             window = V.explain_failure(1, "", "", "")[1]
             os.environ["VRT_BACKGROUND"] = "1"
             hidden = V.explain_failure(1, "", "", "")[1]
-        self.assertTrue(window.endswith("to the person who invited you to the beta."), window)
-        self.assertTrue(hidden.endswith("to the person who invited you to the beta."), hidden)
+        # (round 3e: the helper's sentence says what happened and where to look; the client adds what to do, and names the person)
+        for text in (window, hidden):
+            self.assertTrue(text.startswith("Something went wrong while making the transcript. "), text)
+            self.assertNotIn("Try once more", text)
+        self.assertIn("logs/last-error.txt", window)
+        self.assertIn("logs folder", hidden)
         T = _import("transcribe")
         src = read_text("transcribe.py")
         self.assertEqual(src.count("the person who invited you to the beta"), 2)
@@ -2439,10 +2449,10 @@ class RoundThreeDHelperVersionTests(unittest.TestCase):
     def test_both_files_say_1_1_0(self):
         V = _import("vrt_server")
         T = _import("transcribe")
-        self.assertEqual(V.HELPER_VERSION, "1.1.0")
-        self.assertEqual(T.HELPER_VERSION, "1.1.0")
+        self.assertEqual(V.HELPER_VERSION, "1.1.1")
+        self.assertEqual(T.HELPER_VERSION, "1.1.1")
         self.assertEqual(V.HELPER_ID, "video-review-helper")                    # the identity string the host's opener checks stays
-        for name, want in (("vrt_server.py", 'HELPER_VERSION = "1.1.0"'), ("transcribe.py", 'HELPER_VERSION = "1.1.0"')):
+        for name, want in (("vrt_server.py", 'HELPER_VERSION = "1.1.1"'), ("transcribe.py", 'HELPER_VERSION = "1.1.1"')):
             self.assertIn(want, read_text(name))
         self.check_nothing_compares_the_number()                                   # (so the number can change without anything breaking)
 
@@ -2451,8 +2461,8 @@ class RoundThreeDHelperVersionTests(unittest.TestCase):
         for name in PACKAGE_TEXT_FILES:
             for n, line in enumerate(read_text(name).splitlines(), 1):
                 self.assertIsNone(compares.search(line), "%s line %d: %s" % (name, n, line.strip()))
-        client = os.path.join(REAL, "..", "transcriber-client.js")
-        if os.path.isfile(client):
+        client = module_file("transcriber-client.js")
+        if client:
             with open(client, "rb") as f:
                 js = f.read().decode("utf-8")
             self.assertIsNone(re.search(r"(?<!typeof )\bs\.version\s*(===|!==|==|!=|<|>)", js))          # it is handed on as a string, never compared
@@ -2469,10 +2479,10 @@ class RoundThreeDHelperVersionTests(unittest.TestCase):
                 c.request("GET", "/status")
                 r = c.getresponse()
                 body = json.loads(r.read().decode("ascii"))
-                self.assertEqual(body["version"], "1.1.0")
+                self.assertEqual(body["version"], "1.1.1")
                 self.assertEqual(body["helper"], "video-review-helper")
-                self.assertEqual(r.getheader("X-Helper"), "video-review-helper/1.1.0")
-                self.assertEqual(r.getheader("Server").split()[0], "VideoReviewHelper/1.1.0")      # (the Server header name stays: other code depends on it)
+                self.assertEqual(r.getheader("X-Helper"), "video-review-helper/1.1.1")
+                self.assertEqual(r.getheader("Server").split()[0], "VideoReviewHelper/1.1.1")      # (the Server header name stays: other code depends on it)
                 c.close()
                 c = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
                 c.request("GET", "/", headers={"Origin": "https://evil.example"})
@@ -2490,7 +2500,7 @@ class RoundThreeDHelperVersionTests(unittest.TestCase):
         for name in ("vrt_server.py", "transcribe.py"):
             r = subprocess.run([sys.executable, "-I", os.path.join(TOOLS, name), "--version"], stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120, cwd=TOOLS)
-            self.assertEqual(r.stdout.decode("ascii").strip(), "%s 1.1.0" % name, name)
+            self.assertEqual(r.stdout.decode("ascii").strip(), "%s 1.1.1" % name, name)
 
 
 class RoundThreeDLicenceTests(unittest.TestCase):
@@ -2553,7 +2563,7 @@ class RoundThreeDLicenceTests(unittest.TestCase):
 
     def test_the_readme_has_the_version_line_under_the_title(self):
         lines = read_text("README.md").splitlines()
-        self.assertEqual(lines[0], "# Transcription helper for the Video Redline Tool")
+        self.assertEqual(lines[0], "# Transcription helper for Video Redline")
         self.assertEqual(lines[1], "")
         self.assertEqual(lines[2], "Version 0.1.0-beta")
         self.assertEqual(lines[3], "")
@@ -2567,8 +2577,6 @@ class RoundThreeDLicenceTests(unittest.TestCase):
             self.assertIn(word, above)
         for kept in ("logs/", "venv/", "hf-cache/", "tmp/"):
             self.assertIn(kept, lines)
-        self.assertIn("`.gitignore` keeps the download", read_text("README.md"))
-        self.assertIn("(`*.ico`)", read_text("README.md"))
         read_text(".gitignore").encode("ascii")
 
 
@@ -2696,8 +2704,8 @@ class RoundEightPydocsTests(unittest.TestCase):
             self.assertIn(want, line)
         self.assertLess(line.index("stop-helper-windows.bat"), line.index("Video Redline** icon and click"))
         client = ""
-        client_path = os.path.join(os.path.dirname(REAL), "transcriber-client.js")
-        if os.path.isfile(client_path):
+        client_path = module_file("transcriber-client.js")
+        if client_path:
             with open(client_path, "rb") as f:
                 client = f.read().decode("utf-8")
         if client:                                                                   # (the same remedy as the client's own busy advice)
@@ -2715,7 +2723,7 @@ class RoundEightPydocsTests(unittest.TestCase):
                      "`helper.log`", "`last-error.txt`, if there is one", "add a photo of it"):
             self.assertIn(want, line)
         self.assertNotIn("Send it to the person", line)
-        self.assertIn("the files in the logs folder of the tools folder", read_text("vrt_server.py"))
+        self.assertIn("The logs folder of the tools folder may say more", read_text("vrt_server.py"))
 
 
 if __name__ == "__main__":

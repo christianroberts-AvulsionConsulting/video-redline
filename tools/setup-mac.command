@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================================
-#  Video Redline Tool - one-time setup for Mac           *** NOT TESTED ON A MAC ***
+#  Video Redline - one-time setup for Mac           *** NOT TESTED ON A MAC ***
 #
 #  To run it (once): open Terminal (press Command + Space, type Terminal, press Return), type   bash   and a space,
 #  drag this file (setup-mac.command) into the Terminal window, then press Return.
@@ -36,6 +36,7 @@ export UV_HTTP_TIMEOUT=300
 export UV_SYSTEM_CERTS=1
 export HF_HOME="$TOOLS/hf-cache"
 export HF_HUB_DISABLE_TELEMETRY=1
+export ORT_DISABLE_TELEMETRY=1
 export HF_HUB_DISABLE_SYMLINKS_WARNING=1
 unset HF_HUB_OFFLINE
 
@@ -53,10 +54,28 @@ pause_and_exit() {
     exit "$code"
 }
 
+# whole megabytes free on the drive of this folder, or nothing when it cannot be read
+free_mb() {
+    mb="${VRT_TEST_FREE_MB:-}"
+    if [ -z "$mb" ]; then
+        mb="$(df -k "$TOOLS" 2>/dev/null | awk 'NR==2 {print int($4/1024)}')"
+    fi
+    case "$mb" in
+        ''|*[!0-9]*) mb="" ;;
+    esac
+    printf '%s' "$mb"
+}
+
 fail() {
     echo
     echo "   PROBLEM: $1"
     echo "   WHAT TO DO: $2"
+    low="$(free_mb)"
+    if [ -z "$SKIP_SPACE_NOTE" ] && [ -n "$low" ] && [ "$low" -lt 1024 ]; then
+        echo
+        echo "   NOTE: the drive this folder is on has only about $low MB free. A nearly full drive makes things fail:"
+        echo "   free up some space (setup needs about 2 GB), then run this file again."
+    fi
     pause_and_exit 1
 }
 
@@ -79,13 +98,14 @@ fi
 
 echo
 echo " ====================================================================="
-echo "  Video Redline Tool - one-time setup (Mac)"
+echo "  Video Redline - one-time setup (Mac)"
 echo " ====================================================================="
 echo
 echo "  This installs the speech tools that find the \"um\"s, \"uh\"s, pauses"
 echo "  and stutters in your videos."
 echo
-echo "  * It downloads about 1.3 GB, ONCE (from github.com, pypi.org and huggingface.co)."
+echo "  * It downloads about 1.3 GB, ONCE (from github.com, pypi.org and huggingface.co,"
+echo "    and from the file servers those sites pass you on to)."
 echo "    Allow 5 to 15 minutes."
 echo "  * Everything goes into this folder:"
 echo "      \"$TOOLS\""
@@ -178,12 +198,44 @@ if [ "$ARCH" = "x86_64" ]; then
     echo
 fi
 
+# ---- is macOS new enough? (decided now, before anything big is downloaded) -------------------------
+# The packages in requirements.txt only come in Mac builds that need this: an Apple Silicon Mac, macOS 14 (onnxruntime 1.31.1 and
+# av 19.0.2); an Intel Mac, macOS 13 (onnxruntime 1.23.2). Read from the file names of those packages on pypi.org on 28 Oct 2026.
+# No Intel Mac has ever run this, so for Intel that is what the files say, not something that was tried.
+MACOS="$(sw_vers -productVersion 2>/dev/null)"
+MACOS_MAJOR="${MACOS%%.*}"
+case "$MACOS_MAJOR" in
+    ''|*[!0-9]*) MACOS_MAJOR="" ;;
+esac
+if [ "$ARCH" = "arm64" ]; then MACOS_NEEDS=14; else MACOS_NEEDS=13; fi
+if [ -n "$MACOS_MAJOR" ] && [ "$MACOS_MAJOR" -lt "$MACOS_NEEDS" ]; then
+    if [ "$ARCH" = "arm64" ]; then
+        fail "This Mac runs macOS $MACOS, which is too old. The speech tools for an Apple Silicon Mac (M1 or newer) need macOS 14 or newer; this beta has no version of them for an older macOS. Nothing was downloaded." \
+             "Update macOS to version 14 or newer (Apple menu, then System Settings, General, Software Update; on macOS 12 and older it is System Preferences, Software Update), and run this file again. If your Mac cannot update that far, Video Redline's audio cleanup cannot run on it: tell the person who invited you to the beta."
+    else
+        fail "This Mac runs macOS $MACOS, which is too old. The speech tools for an Intel Mac need macOS 13 or newer (that is what their files say; nobody has tried them on an Intel Mac yet); this beta has no version of them for an older macOS. Nothing was downloaded." \
+             "Update macOS to version 13 or newer if your Mac offers it (Apple menu, then System Settings, General, Software Update; on macOS 12 and older it is System Preferences, Software Update), and run this file again. If it does not, Video Redline's audio cleanup cannot run on this Mac: tell the person who invited you to the beta."
+    fi
+fi
+
+# ---- is there room for a fresh install? (about 2 GB; checked before the big download) ---------------
+# Skipped when the speech models are already there (a repair) and when the free space cannot be read. VRT_TEST_FREE_MB=<number>
+# is the test switch for "this many MB are free".
+if [ ! -d "$TOOLS/hf-cache/hub" ]; then
+    FREE_MB="$(free_mb)"
+    if [ -n "$FREE_MB" ] && [ "$FREE_MB" -lt 2048 ]; then
+        SKIP_SPACE_NOTE=1                                    # (the message below says it already)
+        fail "The drive this folder is on has only about $FREE_MB MB free. Setup needs about 2 GB (it downloads 1.3 GB). Nothing was downloaded." \
+             "Free up some space on that drive (empty the Trash, delete files you do not need), then run this file again."
+    fi
+fi
+
 # ---- step 1: uv -----------------------------------------------------------------------------
 echo " [1 of 6] Getting the small installer (uv, about 15 MB, from github.com) ..."
 if [ ! -x "$UV" ]; then
     mkdir -p "$TOOLS/uv" || fail "I could not create a folder here." "Make sure this folder is not read-only (move it to ~/VideoRedline, a folder called VideoRedline in your home folder)."
     curl -L --fail --silent --show-error --retry 3 -o "$TOOLS/uv/uv-download.tar.gz" "$UV_URL" ||
-        fail "A download failed." "Check your internet connection (and that no VPN or firewall blocks github.com), then run this file again."
+        fail "A download failed." "Check your internet connection (and that no VPN or firewall blocks github.com, githubusercontent.com, pypi.org, pythonhosted.org, huggingface.co or hf.co), then run this file again."
     EXPECTED="$(curl -L --fail --silent "$UV_URL.sha256" | awk '{print $1}')"
     ACTUAL="$(shasum -a 256 "$TOOLS/uv/uv-download.tar.gz" | awk '{print $1}')"
     if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
@@ -203,7 +255,7 @@ echo
 echo " [2 of 6] Getting a private copy of Python (about 25 MB, from github.com) ..."
 # (when the folder was moved, this also repairs the python/cpython-3.12-... link that pointed at the old place)
 "$UV" python install 3.12 --no-bin ||
-    fail "A download failed." "Check your internet connection, then run this file again."
+    fail "A download failed." "Check your internet connection (and that no VPN or firewall blocks github.com or githubusercontent.com), then run this file again."
 echo "       done."
 
 # ---- step 3: virtual environment ------------------------------------------------------------
@@ -234,20 +286,20 @@ echo "       done."
 echo
 echo " [4 of 6] Installing the speech tools (about 100 MB download from pypi.org) ..."
 "$UV" pip install --python "$PY" -r "$TOOLS/requirements.txt" ||
-    fail "A download or install failed. (Apple Silicon Macs need macOS 14 or newer for this step.)" "Check your internet connection and run this file again. If your Mac is older than macOS 14, ask the person who invited you to the beta for help."
-# Can every package really start on this Mac? Finding out now saves the 1.2 GB model download below.
+    fail "A download or install failed." "Check your internet connection (and that no VPN or firewall blocks pypi.org or pythonhosted.org) and run this file again. If it keeps failing, ask the person who invited you to the beta for help."
+# Can every package really start on this Mac? Finding out now saves the 1.1 GB model download below.
 "$PY" "$TOOLS/transcribe.py" --check-packages ||
     fail "The speech tools were installed but cannot start on this Mac." "Follow the WHAT TO DO line just above this message, then run this file again."
 echo "       done."
 
 # ---- step 5: models -------------------------------------------------------------------------
 echo
-echo " [5 of 6] Downloading the speech models from huggingface.co. This is the big one: about 1.2 GB, once."
+echo " [5 of 6] Downloading the speech models from huggingface.co. This is the big one: about 1.1 GB, once."
 echo "          A progress bar is shown for each file. If it stops, run this file again:"
 echo "          it continues where it left off. Models that are already complete are not downloaded again."
 echo
 "$PY" "$TOOLS/transcribe.py" --download-models ||
-    fail "The speech models could not be downloaded completely." "Check the internet connection and run this file again. It continues where it left off."
+    fail "The speech models could not be downloaded completely." "Check the internet connection (and that no VPN or firewall blocks huggingface.co or hf.co, the file server the models come from) and run this file again. It continues where it left off."
 
 # ---- step 6: self-test ----------------------------------------------------------------------
 echo

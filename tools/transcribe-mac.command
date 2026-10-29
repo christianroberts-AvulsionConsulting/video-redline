@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================================
-#  Video Redline Tool - transcribe a video (Mac)         *** NOT TESTED ON A MAC ***
+#  Video Redline - transcribe a video (Mac)         *** NOT TESTED ON A MAC ***
 #
 #  To use it: open Terminal (press Command + Space, type Terminal, press Return), type   bash   and a space, drag this
 #  file (transcribe-mac.command) into the Terminal window, type another space, drag your video into the window too,
@@ -23,6 +23,7 @@ PY="$TOOLS/venv/bin/python"
 export HF_HOME="$TOOLS/hf-cache"
 export HF_HUB_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
+export ORT_DISABLE_TELEMETRY=1
 export HF_HUB_DISABLE_SYMLINKS_WARNING=1
 export PYTHONUTF8=1
 

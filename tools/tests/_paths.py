@@ -30,6 +30,16 @@ NO_BASH = ("needs a bash that can open Windows folders (Git for Windows has one;
 _BASH = []                                                             # [] = not looked up yet, then [path or None]
 
 
+def module_file(name):
+    """transcriber-client.js or cleanup-panel.js: next to the tools folder in the author's working copy, in src/vendor/ in the repository.
+    The path, or None when the file is in neither place."""
+    for parts in (("..", name), ("..", "src", "vendor", name)):
+        path = os.path.abspath(os.path.join(REAL, *parts))
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def cloud_named(path):
     """True if the path lies in a cloud-looking place (then 'a plain folder gives no warning' cannot be tested, and
     setup-windows.bat / setup-mac.command stop at their folder question). Code from before the folder check has no list: False."""

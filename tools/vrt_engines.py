@@ -12,7 +12,7 @@ import re
 import numpy as np
 
 from vrt_audio import SR, to_float
-from vrt_env import describe_import_failure
+from vrt_env import describe_import_failure, switch_off_ort_telemetry
 from vrt_merge import norm
 
 PARAKEET_MODELS = {
@@ -38,6 +38,30 @@ WHISPER_REPOS = {
 }
 WHISPER_FILES = ["config.json", "model.bin", "tokenizer.json", "vocabulary.*", "vocabulary.json",
                  "preprocessor_config.json"]
+
+# The exact commit of every model repo that the helper downloads, so that a later change to a repo on Hugging Face cannot
+# change what setup installs. Looked up on 28 Oct 2026 (the head of each repo's main branch that day); for each one the
+# files the helper needs were checked to exist at that commit. To move to a newer model: check it, then change the id here
+# (and in THIRD-PARTY-NOTICES.md). A repo that a person names by hand (`--whisper owner/name`) is not in this table and is
+# downloaded from its main branch, as before.
+MODEL_REVISIONS = {
+    "istupakov/parakeet-tdt-0.6b-v2-onnx": "0bbb45a3365852604aef28b538a8f066f4ccaa85",
+    "istupakov/parakeet-tdt-0.6b-v3-onnx": "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce",
+    "istupakov/silero-vad-onnx": "b3e3ee3cce4c11ceb63b1a0b229d916069c1ddf6",
+    "Systran/faster-whisper-tiny.en": "0d3d19a32d3338f10357c0889762bd8d64bbdeba",
+    "Systran/faster-whisper-tiny": "d90ca5fe260221311c53c58e660288d3deb8d356",
+    "Systran/faster-whisper-base.en": "3d3d5dee26484f91867d81cb899cfcf72b96be6c",
+    "Systran/faster-whisper-base": "ebe41f70d5b6dfa9166e2c581c45c9c0cfc57b66",
+    "Systran/faster-whisper-small.en": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+    "Systran/faster-whisper-small": "536b0662742c02347bc0e980a01041f333bce120",
+    "Systran/faster-whisper-medium.en": "a29b04bd15381511a9af671baec01072039215e3",
+    "Systran/faster-whisper-medium": "08e178d48790749d25932bbc082711ddcfdfbc4f",
+    "Systran/faster-whisper-large-v1": "b07c8d4be0be90092aa01a29c975077acb8d15c9",
+    "Systran/faster-whisper-large-v2": "f0fe81560cb8b68660e564f55dd99207059c092e",
+    "Systran/faster-whisper-large-v3": "edaa852ec7e145841d8ffdb056a99866b5f0a478",
+    "mobiuslabsgmbh/faster-whisper-large-v3-turbo": "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    "Systran/faster-distil-whisper-large-v3": "c3058b475261292e64a0412df1d2681c06260fab",
+}
 WHISPER_MB = {"tiny.en": 75, "tiny": 75, "base.en": 145, "base": 145, "small.en": 485, "small": 485,
               "medium.en": 1530, "medium": 1530, "large-v1": 3090, "large-v2": 3090, "large-v3": 3090,
               "large": 3090, "large-v3-turbo": 1620, "turbo": 1620, "distil-large-v3": 1510}
@@ -66,9 +90,34 @@ def _is_missing_model_error(e):
 
 
 def download_snapshot(repo, patterns):
-    """Download (or confirm) the files of one model repo into the Hugging Face cache folder."""
+    """Download (or confirm) the files of one model repo into the Hugging Face cache folder.
+
+    A repo in MODEL_REVISIONS is fetched at that exact commit. The engines later open the model offline by the name "main",
+    which the cache answers from its refs/main file, so that file is pointed at the commit that was just downloaded.
+    """
     from huggingface_hub import snapshot_download
-    return snapshot_download(repo, allow_patterns=patterns)
+    rev = MODEL_REVISIONS.get(repo)
+    path = snapshot_download(repo, revision=rev, allow_patterns=patterns)
+    if rev:
+        _point_main_at(path, rev)
+    return path
+
+
+def _point_main_at(snapshot_path, rev):
+    """Write <repo cache folder>/refs/main = rev, unless the downloaded snapshot is not that commit's folder."""
+    try:
+        snap = os.path.abspath(snapshot_path)
+        if os.path.basename(snap) != rev:
+            return False
+        refs = os.path.join(os.path.dirname(os.path.dirname(snap)), "refs")
+        os.makedirs(refs, exist_ok=True)
+        tmp = os.path.join(refs, "main.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(rev)
+        os.replace(tmp, os.path.join(refs, "main"))
+        return True
+    except OSError:
+        return False
 
 
 # What must be in the downloaded copy of a model before it can be used: (file name or "a|b" alternatives, smallest
@@ -307,15 +356,18 @@ def add_chunk_words(kept, new, prev_end, tolerance=0.4, look_back=8):
     return dropped
 
 
+# (switch_off_ort_telemetry is in vrt_env.py, so that `transcribe.py --check-packages`, which imports onnxruntime too, can use it)
 class Parakeet:
     def __init__(self, version="v2", threads=4, log=print):
         import types
+        os.environ["ORT_DISABLE_TELEMETRY"] = "1"       # must be set before onnxruntime is imported
         try:
             import onnxruntime as rt
             import onnx_asr
         except Exception as e:
             msg, hint = describe_import_failure(e, "The Parakeet speech engine (onnxruntime / onnx-asr)")
             raise EngineProblem(msg, hint) from e
+        switch_off_ort_telemetry(rt)
         self.version = version
         self.model_name, self.repo, self.label = PARAKEET_MODELS[version]
         require_model(self.repo, "parakeet", "Parakeet speech model")
@@ -405,6 +457,7 @@ class Whisper:
         self.model_name = model
         repo = WHISPER_REPOS.get(model, model)
         self.repo = repo
+        switch_off_ort_telemetry()                      # faster-whisper loads onnxruntime itself when it needs it
         try:
             from faster_whisper import WhisperModel
         except Exception as e:

@@ -2,7 +2,7 @@
 """Video Redline helper - a small program that runs on YOUR computer so the Video Redline page can make a transcript
 with one click.
 
-A web page cannot start programs, so the Video Redline page never starts this helper (neither do its buttons Create transcript
+A web page cannot start programs, so the Video Redline page never starts this helper (neither do its buttons Create transcript and find cuts
 and Check again): the helper has to be running first. Windows: double-click the Video Redline icon on your Desktop; it starts the
 helper if needed (hidden, with no window) and opens the page. If there is no such icon yet, double-click setup-autostart-windows.bat
 once (it adds the icon and makes the helper start by itself at every sign-in); if you would rather not, double-click
@@ -88,7 +88,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 HELPER_ID = "video-review-helper"
-HELPER_VERSION = "1.1.0"          # raised from 1.0.0 for the Video Redline beta, so an older helper can be told apart; nothing compares it
+HELPER_VERSION = "1.1.1"          # raised from 1.0.0 for the Video Redline beta, so an older helper can be told apart; nothing compares it
 IS_WIN = os.name == "nt"
 IS_MAC = sys.platform == "darwin"
 
@@ -98,7 +98,7 @@ JOBS_DIR = os.path.join(TMP_DIR, "jobs")          # main() replaces this with tm
 TRANSCRIBE_PY = os.path.join(TOOLS_DIR, "transcribe.py")
 SETUP_FILE = "setup-windows.bat" if IS_WIN else "setup-mac.command"
 START_FILE = "start-helper-windows.bat" if IS_WIN else "start-helper-mac.command"
-STOP_FILE = "stop-helper-windows.bat"             # not part of this package: the Windows automatic start brings it (see AUTOSTART.md)
+STOP_FILE = "stop-helper-windows.bat"             # part of the Windows start-up files in this folder (see AUTOSTART.md); texts name it only if it is there
 AUTOSTART_FILE = "setup-autostart-windows.bat"    # ditto: it adds the start-up setting and the Video Redline icon (the icon starts the helper)
 # Task Manager shows no command line unless that column is added; the hidden helper is told apart by the folder in its command line
 TASK_MANAGER_STEPS = "Task Manager, Details tab; first right-click the column bar, choose Select columns and tick Command line"
@@ -113,8 +113,8 @@ def how_to_run(name):
 
 
 def has_autostart_file():
-    """True when setup-autostart-windows.bat lies in this tools folder. It comes with the Video Redline app, so a copy of the tools
-    folder may not have it (the texts then fall back to the hand start). Only asked on Windows."""
+    """True when setup-autostart-windows.bat lies in this tools folder. It is part of the download, but a copy of the tools folder
+    may have lost it (the texts then fall back to the hand start). Only asked on Windows."""
     return os.path.isfile(os.path.join(TOOLS_DIR, AUTOSTART_FILE))
 
 
@@ -220,10 +220,9 @@ def how_to_stop_running():
 
 def stop_first_text():
     """One plain sentence for people who are about to repair, move, rename or replace the tools folder: a running helper
-    holds files in it (the same sentence is in README.md). The Windows file stop-helper-windows.bat is named as an 'if'
-    because a copy of the tools folder may not have it. Keep it short: moved_text() must stay under 400 characters."""
+    holds files in it (the same sentence is in README.md). Keep it short: moved_text() must stay under 400 characters."""
     if IS_WIN:
-        return "If a helper is running, end it first: close its window, or double-click %s (if your tools folder has that file)." % STOP_FILE
+        return "If a helper is running, end it first: close its window, or double-click %s." % STOP_FILE
     return "If the helper is running, end it first: close its Terminal window."
 
 
@@ -727,6 +726,7 @@ def child_env():
     env["HF_HOME"] = os.path.join(TOOLS_DIR, "hf-cache")
     env["HF_HUB_OFFLINE"] = "1"
     env["HF_HUB_DISABLE_TELEMETRY"] = "1"
+    env["ORT_DISABLE_TELEMETRY"] = "1"            # stops the usage reporting of the ONNX Runtime builds that report over the internet
     env["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -951,8 +951,7 @@ def extract_problem(output):
 def explain_failure(rc, problem, todo, output, stalled=False):
     """(code, plain-language message). Never contains a file path or a stack trace."""
     if stalled:
-        return "failed", ("The speech engine stopped responding, so I stopped it. Close other programs and try again, or try "
-                          "a shorter recording.")
+        return "failed", "The speech engine stopped responding, so I stopped it. Close other programs and try again."
     p = (problem or "").lower()
     t = (todo or "").lower()
     both = p + " " + t
@@ -988,11 +987,10 @@ def explain_failure(rc, problem, todo, output, stalled=False):
         return "out-of-memory", ("The speech engine stopped suddenly. The computer may have run out of memory. Close other "
                                  "programs and try again.")
     if background_mode():                                          # (no window: the text of the helper is in the logs folder, if anywhere)
-        return "failed", ("Something unexpected went wrong while making the transcript. Try once more. If it keeps happening, "
-                          "send the files in the logs folder of the tools folder (if there are any) to the person who invited you to the beta.")
-    return "failed", ("Something unexpected went wrong while making the transcript. Try once more. If it keeps happening, send "
-                      "the helper window text (and logs/last-error.txt from the tools folder, if there is one) to the person "
-                      "who invited you to the beta.")
+        return "failed", ("Something went wrong while making the transcript. The logs folder of the tools folder may say more "
+                          "(helper.log, and last-error.txt if there is one).")
+    return "failed", ("Something went wrong while making the transcript. The file logs/last-error.txt in the tools folder "
+                      "may say more, if there is one.")
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1578,10 +1576,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._method_not_allowed("GET")
                 if background_mode():
                     text = ("Video Redline helper is running in the background. Go back to the Video Redline page and click "
-                            "Create transcript.\n")
+                            "Create transcript and find cuts.\n")
                 else:
                     text = ("Video Redline helper is running. Leave its window open, go back to the Video Redline page and click "
-                            "Create transcript.\n")
+                            "Create transcript and find cuts.\n")
                 return self._send_bytes(200, text.encode("ascii"), "text/plain; charset=utf-8")
             if path == "/status":
                 if method != "GET":
@@ -2218,11 +2216,12 @@ def already_running_lines(background):
     if background:
         return ["The Video Redline helper is ALREADY RUNNING.",
                 "You do not need to start it again. Go back to the Video Redline page",
-                "and click Create transcript."]
+                "and click Create transcript and find cuts."]
     where = "in another window, or running hidden" if IS_WIN else "in another Terminal window"
     return ["The Video Redline helper is ALREADY RUNNING (%s)." % where,
             "You do not need to start it again. Go back to the Video Redline page",
-            "and click Create transcript. You can close this window: that does not stop the helper."]
+            "and click Create transcript and find cuts.",
+            "You can close this window: that does not stop the helper."]
 
 
 SYNC_WAIT_S = 1.0                                                              # longest start-up waits for the folder check before it answers
@@ -2329,12 +2328,13 @@ def main(argv=None):
     ready, _, problem = READY.snapshot()
     if ready and background:
         banner(["Video Redline helper is running in the background.",
-                "Go back to the page and click Create transcript.",
+                "Go back to the page and click Create transcript and find cuts.",
                 how_to_stop_background(),
                 "(connection number %d on this computer only)" % port])
     elif ready:
         banner(["Video Redline helper is running.",
-                "Leave this window open. Go back to the page and click Create transcript.",
+                "Leave this window open. Go back to the page and click",
+                "Create transcript and find cuts.",
                 "To stop the helper, close this window.",
                 "(connection number %d on this computer only)" % port])
     else:

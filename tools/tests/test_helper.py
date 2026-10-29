@@ -692,6 +692,50 @@ class ModelFilesTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(calls, ["Systran/faster-whisper-small.en"])
 
+    # ---- round 3e (item 3): models come from one exact commit, not from whatever the branch head is today ----
+    def test_every_model_the_helper_can_download_has_a_full_commit_id(self):
+        E = self.E
+        repos = {m[1] for m in E.PARAKEET_MODELS.values()} | {E.SILERO_REPO} | set(E.WHISPER_REPOS.values())
+        self.assertEqual(sorted(repos), sorted(E.MODEL_REVISIONS))                 # nothing missing, nothing left over
+        for repo, rev in E.MODEL_REVISIONS.items():
+            self.assertRegex(rev, r"^[0-9a-f]{40}$", repo)
+
+    def fake_hub_download(self, calls, rev):
+        """Stand-in for huggingface_hub.snapshot_download that lays out what the real one does for a commit id."""
+        def fake(repo, **kw):
+            calls.append((repo, kw))
+            snap = make_fake_cache(self.root, repo, {"config.json": 5})
+            os.replace(snap, os.path.join(os.path.dirname(snap), rev))
+            os.remove(os.path.join(self.root, "models--" + repo.replace("/", "--"), "refs", "main"))     # a commit id leaves no ref
+            return os.path.join(os.path.dirname(snap), rev)
+        return fake
+
+    def test_a_download_asks_for_the_pinned_commit_and_points_main_at_it(self):
+        E = self.E
+        repo = "Systran/faster-whisper-small.en"
+        rev = E.MODEL_REVISIONS[repo]
+        calls = []
+        with mock.patch("huggingface_hub.snapshot_download", self.fake_hub_download(calls, rev)):
+            path = E.download_snapshot(repo, E.WHISPER_FILES)
+        self.assertEqual(calls, [(repo, {"revision": rev, "allow_patterns": E.WHISPER_FILES})])
+        self.assertEqual(os.path.basename(path), rev)
+        # the engines open the model offline by the name "main": the cache answers that from refs/main
+        self.assertEqual(E._snapshot_of(repo), rev)
+
+    def test_a_repo_the_person_named_by_hand_is_downloaded_from_main_as_before(self):
+        E = self.E
+        calls = []
+        with mock.patch("huggingface_hub.snapshot_download", lambda repo, **kw: calls.append((repo, kw)) or "x"):
+            E.download_snapshot("someone/their-own-model", ["config.json"])
+        self.assertEqual(calls, [("someone/their-own-model", {"revision": None, "allow_patterns": ["config.json"]})])
+
+    def test_main_is_not_pointed_at_a_folder_that_is_not_that_commit(self):
+        E = self.E
+        snap = make_fake_cache(self.root, "Systran/faster-whisper-small.en", {"config.json": 5})      # folder abc123def456
+        before = E._snapshot_of("Systran/faster-whisper-small.en")
+        self.assertFalse(E._point_main_at(snap, "d1d751a5f8271d482d14ca55d9e2deeebbae577f"))
+        self.assertEqual(E._snapshot_of("Systran/faster-whisper-small.en"), before)
+
 
 # ------------------------------------------------------------------------------------------------
 # 3 and 12. Folder moved or copied after setup
@@ -794,7 +838,7 @@ class ScriptFileTests(unittest.TestCase):
         # an unquoted "echo %TOOLS%" breaks on a folder such as "Tom & Jerry" and drops a "^"
         for name in self.BAT:
             for n, line in enumerate(read_bytes(name).decode("ascii").splitlines(), 1):
-                if re.match(r"\s*echo", line, re.I) and "%TOOLS%" in line:
+                if re.match(r"\s*echo\b", line, re.I) and "%TOOLS%" in line:
                     self.assertRegex(line, r'"[^"]*%TOOLS%[^"]*"', "%s line %d: %s" % (name, n, line))
 
     def test_windows_scripts_check_for_a_zip_and_for_missing_files(self):
@@ -915,6 +959,191 @@ class LastErrorFileTests(unittest.TestCase):
             self.assertNotIn(gone, text)
         self.assertIn("Options: ['--no-whisper', '--out'] (and 2 other argument(s), not written here)", text)
         self.assertIn("RuntimeError: boom", text)                       # the traceback is still there
+
+
+class PageModulePathTests(unittest.TestCase):
+    """Round 3e (item 15a). The page modules lie next to the tools folder in the author's working copy and in src/vendor/ in the repository."""
+
+    def test_module_file_looks_in_both_places(self):
+        root = tempfile.mkdtemp(prefix="mf-", dir=SCRATCH)
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        tools = os.path.join(root, "tools")
+        os.makedirs(tools)
+        with mock.patch.object(_paths, "REAL", tools):
+            self.assertIsNone(_paths.module_file("cleanup-panel.js"))
+            os.makedirs(os.path.join(root, "src", "vendor"))
+            vendor = os.path.join(root, "src", "vendor", "cleanup-panel.js")
+            open(vendor, "w").close()
+            self.assertEqual(_paths.module_file("cleanup-panel.js"), os.path.abspath(vendor))          # the repository layout
+            nextto = os.path.join(root, "cleanup-panel.js")
+            open(nextto, "w").close()
+            self.assertEqual(_paths.module_file("cleanup-panel.js"), os.path.abspath(nextto))          # the working copy wins
+            self.assertIsNone(_paths.module_file("transcriber-client.js"))
+
+
+class SelfTestNoteTests(unittest.TestCase):
+    """Round 3e (item 11). setup-windows.bat asks a person whose self-test failed to send logs\\last-error.txt: that file has to exist."""
+
+    def test_a_failed_self_test_writes_the_note_that_setup_asks_for(self):
+        T = _import("transcribe")
+        folder = tempfile.mkdtemp(prefix="st-", dir=SCRATCH)
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        empty = {"doc": {"format": "video-review-transcript", "version": 1, "video": {}, "engines": [], "words": [], "silences": [],
+                         "sounds": []}, "elapsed": 1.0}
+        out = io.StringIO()
+
+        def fake_pipeline(a):
+            import json
+            with open(a.out, "w", encoding="utf-8") as f:
+                json.dump(empty["doc"], f)
+            return empty
+
+        with mock.patch.object(T, "TOOLS_DIR", folder), mock.patch("vrt_env.venv_problem", return_value=None), \
+                mock.patch.object(T, "run_pipeline", side_effect=fake_pipeline), contextlib.redirect_stdout(out):
+            code = T.main(["--self-test"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("PROBLEM: The self-test did not pass: the quiet gap was not found; the hum / click / noise were not found.", out.getvalue())
+        note = os.path.join(folder, "logs", "last-error.txt")
+        self.assertTrue(os.path.isfile(note), out.getvalue())
+        self.assertIn("A technical note was saved here: " + note, out.getvalue())
+        with open(note, encoding="utf-8") as f:
+            self.assertIn("The self-test did not pass", f.read())
+
+    def test_a_problem_that_is_not_a_self_test_writes_no_note(self):
+        T = _import("transcribe")
+        folder = tempfile.mkdtemp(prefix="st-", dir=SCRATCH)
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        with mock.patch.object(T, "TOOLS_DIR", folder), mock.patch("vrt_env.venv_problem", return_value=("The private Python is wrong.", "Run setup.")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            T.main(["--check-venv"])
+        self.assertFalse(os.path.exists(os.path.join(folder, "logs", "last-error.txt")))
+
+
+class TelemetryTests(unittest.TestCase):
+    """Round 3e (item 1). The onnxruntime that is installed says in its own Privacy.md that its official builds send usage events
+    to Microsoft unless ORT_DISABLE_TELEMETRY=1 is set before it starts (and the Python call disable_telemetry_events() is made).
+    The helper promises that nothing leaves the computer, so it does both everywhere onnxruntime can start."""
+
+    def test_the_helpers_child_processes_get_it_even_if_the_person_had_set_it_to_0(self):
+        V = _import("vrt_server")
+        with mock.patch.dict(os.environ, {"ORT_DISABLE_TELEMETRY": "0"}):
+            self.assertEqual(V.child_env()["ORT_DISABLE_TELEMETRY"], "1")
+
+    def test_transcribe_py_sets_it_when_it_is_imported_before_anything_else_loads(self):
+        code = ("import sys, os; sys.path.insert(0, sys.argv[1]); import transcribe; "
+                "print('ORT=' + os.environ.get('ORT_DISABLE_TELEMETRY', 'unset') + ' loaded=' + str('onnxruntime' in sys.modules))")
+        r = subprocess.run([sys.executable, "-I", "-c", code, TOOLS], stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=120, env=dict(os.environ, ORT_DISABLE_TELEMETRY="0"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ORT=1 loaded=False", r.stdout)
+
+    class RecordOnImport(object):
+        """A meta_path finder that makes a stand-in for the named modules when they are first imported, and writes down what
+        ORT_DISABLE_TELEMETRY said at that very moment (a module that is already in sys.modules would never show it)."""
+
+        def __init__(self, makers):
+            self.makers = makers
+            self.seen = {}
+
+        def find_spec(self, name, path=None, target=None):
+            if name in self.makers:
+                import importlib.util
+                return importlib.util.spec_from_loader(name, self)
+            return None
+
+        def create_module(self, spec):
+            self.seen[spec.name] = os.environ.get("ORT_DISABLE_TELEMETRY")
+            return self.makers[spec.name]()
+
+        def exec_module(self, module):
+            pass
+
+    @contextlib.contextmanager
+    def import_recording(self, makers):
+        names = set(makers) | {"onnx_asr", "faster_whisper"}
+        saved = {k: sys.modules.pop(k) for k in list(sys.modules) if k.split(".")[0] in names}
+        finder = self.RecordOnImport(makers)
+        sys.meta_path.insert(0, finder)
+        try:
+            yield finder
+        finally:
+            sys.meta_path.remove(finder)
+            for k in [k for k in sys.modules if k.split(".")[0] in names]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+
+    def fake_runtime(self, calls, fails=None):
+        rt = types.ModuleType("onnxruntime")
+        rt.SessionOptions = type("SessionOptions", (), {})
+
+        def disable_telemetry_events():
+            calls.append(os.environ.get("ORT_DISABLE_TELEMETRY"))
+            if fails:
+                raise fails
+        rt.disable_telemetry_events = disable_telemetry_events
+        asr = types.ModuleType("onnx_asr")
+        asr.load_model = lambda *a, **k: types.SimpleNamespace(asr=types.SimpleNamespace())
+        asr.load_vad = lambda *a, **k: object()
+        return {"onnxruntime": rt, "onnx_asr": asr}
+
+    def test_parakeet_sets_the_variable_before_it_imports_onnxruntime_and_then_calls_disable_telemetry_events(self):
+        E = _import("vrt_engines")
+        calls = []
+        modules = self.fake_runtime(calls)
+        with self.import_recording({name: (lambda m=m: m) for name, m in modules.items()}) as rec, \
+                mock.patch.object(E, "require_model", lambda *a, **k: None), mock.patch.dict(os.environ, {"ORT_DISABLE_TELEMETRY": "0"}):
+            E.Parakeet("v2")
+        self.assertEqual(rec.seen["onnxruntime"], "1")                               # already 1 when onnxruntime was imported
+        self.assertEqual(calls, ["1"])                                               # called once
+
+    def test_check_packages_asks_onnxruntime_to_hold_back_too(self):
+        """transcribe.py --check-packages runs at every helper start and imports onnxruntime as well."""
+        import vrt_env
+        with mock.patch.object(vrt_env, "switch_off_ort_telemetry") as switch, mock.patch.dict(os.environ, {"ORT_DISABLE_TELEMETRY": "0"}):
+            problem = vrt_env.check_packages()
+            self.assertEqual(os.environ["ORT_DISABLE_TELEMETRY"], "1")
+        self.assertIsNone(problem)
+        switch.assert_called_once()
+        self.assertEqual(switch.call_args[0][0].__name__, "onnxruntime")
+        self.assertIs(_import("vrt_engines").switch_off_ort_telemetry, vrt_env.switch_off_ort_telemetry)
+
+    def test_a_failing_or_missing_disable_call_never_stops_the_engine(self):
+        E = _import("vrt_engines")
+        for fails in (RuntimeError("no such thing"), AttributeError("old onnxruntime")):
+            calls = []
+            with mock.patch.dict(sys.modules, self.fake_runtime(calls, fails)), \
+                    mock.patch.object(E, "require_model", lambda *a, **k: None):
+                p = E.Parakeet("v2")
+            self.assertEqual(calls, ["1"])
+            self.assertTrue(hasattr(p, "asr"))
+        modules = self.fake_runtime([])
+        del modules["onnxruntime"].disable_telemetry_events                  # a build that has no such function at all
+        with mock.patch.dict(sys.modules, modules), mock.patch.object(E, "require_model", lambda *a, **k: None):
+            self.assertTrue(hasattr(E.Parakeet("v2"), "asr"))
+
+    def test_whisper_sets_the_variable_before_faster_whisper_can_load_onnxruntime(self):
+        E = _import("vrt_engines")
+        seen = []
+        fw = types.ModuleType("faster_whisper")
+
+        def whisper_model(*a, **k):
+            seen.append(os.environ.get("ORT_DISABLE_TELEMETRY"))
+            return object()
+        fw.WhisperModel = whisper_model
+        with self.import_recording({"faster_whisper": lambda: fw}) as rec, mock.patch.object(E, "require_model", lambda *a, **k: None), \
+                mock.patch.dict(os.environ, {"ORT_DISABLE_TELEMETRY": "0"}):
+            E.Whisper("small.en")
+        self.assertEqual(rec.seen["faster_whisper"], "1")                            # set before faster-whisper (and so onnxruntime) can load
+        self.assertEqual(seen, ["1"])
+
+    def test_the_real_onnxruntime_takes_the_call(self):
+        E = _import("vrt_engines")
+        try:
+            import onnxruntime as rt
+        except Exception as exc:
+            self.skipTest("onnxruntime is not installed here: %s" % exc)
+        self.assertTrue(E.switch_off_ort_telemetry(rt))
+        self.assertFalse(E.switch_off_ort_telemetry())                         # without the module only the variable is set
 
 
 if __name__ == "__main__":

@@ -76,7 +76,7 @@ All come from pypi.org. Licences below are as stated inside the installed packag
 | onnx-asr | 0.12.0 | Runs the Parakeet model | MIT, Copyright (c) 2025 Ilya Stupakov |
 | faster-whisper | 1.2.1 | Runs the Whisper model | MIT, Copyright (c) 2023 SYSTRAN |
 | ctranslate2 | 4.8.4 | Engine under faster-whisper | MIT (OpenNMT). See 2.3 for what its Windows package carries |
-| onnxruntime | 1.31.1 | Engine under Parakeet and the voice detector | MIT, Copyright (c) Microsoft Corporation. The package carries its own `ThirdPartyNotices.txt` |
+| onnxruntime | 1.31.1 | Engine under Parakeet and the voice detector | MIT, Copyright (c) Microsoft Corporation. The package carries its own `ThirdPartyNotices.txt`. It has usage reporting of its own (on Windows through Windows' own event system, on a Mac over the internet in the Apple-silicon build); the helper asks it to stop as far as that can be asked (see `tools/README.md`). |
 | av (PyAV) | 19.0.2 | Opens video and audio files and reads the sound | BSD-3-Clause. **Contains FFmpeg, see 2.3** |
 | numpy | 2.5.4 | Sound measurements | BSD-3-Clause, with MIT, 0BSD, Zlib and CC0 parts; the package carries OpenBLAS (BSD) and the GCC runtime library (GPL-3 with the GCC runtime exception, which allows use in any program) |
 | huggingface-hub | 2.3.0 | Downloads the models | Apache-2.0 |
@@ -117,7 +117,7 @@ The installed `ctranslate2` package does not include licence texts for the Intel
 
 ### 2.4 Speech models
 
-All come from huggingface.co and are stored in `tools/hf-cache/`. The set-up downloads the first three by default. The others are only downloaded if you ask for them (`transcribe.py --download-models --whisper ...` or `--parakeet v3`). Revision numbers are the versions checked on 28 October 2026.
+All come from huggingface.co and are stored in `tools/hf-cache/`. The set-up downloads the first three by default. The others are only downloaded if you ask for them (`transcribe.py --download-models --whisper ...` or `--parakeet v3`). The set-up downloads exactly the revisions listed in `MODEL_REVISIONS` in `tools/vrt_engines.py` (a full commit for every model, looked up on 28 October 2026: the licences below were checked for those revisions). The revision numbers in the table are the first 8 characters of those commits; the other models are pinned the same way.
 
 | Model | Made by | Downloaded as | Licence | By default? |
 |---|---|---|---|---|

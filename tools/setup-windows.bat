@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================================================
-rem  Video Redline Tool - one-time setup for Windows
+rem  Video Redline - one-time setup for Windows
 rem  Double-click this file once. It downloads everything into THIS folder only:
 rem  no admin rights, no changes to Windows, no changes to PATH or the registry.
 rem  (One exception on a few PCs: the Microsoft Visual C++ runtime, see the check below.)
@@ -18,7 +18,7 @@ rem  VRT_NO_PAUSE=1 skips every "press any key" wait and the question about the 
 rem ============================================================================================
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul 2>&1
-title Video Redline Tool - one-time setup
+title Video Redline - one-time setup
 
 rem Settings left on this PC by other software (another Python, CAD or GIS programs) would break our own private
 rem Python, so they are cleared for this window only.
@@ -44,6 +44,14 @@ if /i "%FOLDERNAME:~-4%"==".zip" goto in_zip
 if /i "%FOLDERNAME:~0,4%"=="Temp" if /i "%FOLDERNAME:~5,1%"=="_" goto in_zip
 if /i "%FOLDERNAME:~0,3%"=="7zO" goto in_zip
 if /i "%FOLDERNAME:~0,6%"=="Rar$EX" goto in_zip
+rem (Explorer unpacks a single file together with its folder: <zip>\tools\<file>, so the folder above can be the zip)
+for %%I in ("%TOOLS%\..") do set "PARENTDIR=%%~fI"
+set "PARENTNAME=-"
+for %%I in ("%PARENTDIR%") do if not "%%~nxI"=="" set "PARENTNAME=%%~nxI"
+if /i "%PARENTNAME:~-4%"==".zip" goto in_zip
+if /i "%PARENTNAME:~0,4%"=="Temp" if /i "%PARENTNAME:~5,1%"=="_" goto in_zip
+if /i "%PARENTNAME:~0,3%"=="7zO" goto in_zip
+if /i "%PARENTNAME:~0,6%"=="Rar$EX" goto in_zip
 if not exist "%TOOLS%\requirements.txt" goto not_extracted
 if not exist "%TOOLS%\transcribe.py" goto not_extracted
 if not exist "%TOOLS%\vrt_audio.py" goto not_extracted
@@ -64,6 +72,7 @@ set "UV_HTTP_TIMEOUT=300"
 set "UV_SYSTEM_CERTS=1"
 set "HF_HOME=%TOOLS%\hf-cache"
 set "HF_HUB_DISABLE_TELEMETRY=1"
+set "ORT_DISABLE_TELEMETRY=1"
 set "HF_HUB_DISABLE_SYMLINKS_WARNING=1"
 set "HF_HUB_OFFLINE="
 set "UV=%TOOLS%\uv\uv.exe"
@@ -71,13 +80,14 @@ set "PY=%TOOLS%\venv\Scripts\python.exe"
 
 echo.
 echo  =====================================================================
-echo   Video Redline Tool - one-time setup
+echo   Video Redline - one-time setup
 echo  =====================================================================
 echo.
 echo   This installs the speech tools that find the "um"s, "uh"s, pauses
 echo   and stutters in your videos.
 echo.
-echo   * It downloads about 1.3 GB, ONCE (from github.com, pypi.org and huggingface.co).
+echo   * It downloads about 1.3 GB, ONCE (from github.com, pypi.org and huggingface.co,
+echo     and from the file servers those sites pass you on to).
 echo     Allow 5 to 15 minutes.
 echo   * Everything goes into this folder:
 echo       "%TOOLS%"
@@ -124,6 +134,16 @@ if defined PROCESSOR_ARCHITEW6432 set "SYS32=%SystemRoot%\Sysnative"
 if not exist "%SYS32%\msvcp140.dll" goto vc_missing
 if not exist "%SYS32%\msvcp140_1.dll" goto vc_missing
 :vc_ok
+
+rem ---- is there room for a fresh install? (about 2 GB; checked before the big download) ----------------------
+rem A full drive would otherwise be blamed on the internet. Skipped when the speech models are already there (a repair), on a
+rem network path, and when the free space cannot be read. VRT_TEST_FREE_MB=<number> is the test switch for "this many MB are free".
+if exist "%TOOLS%\hf-cache\hub" goto space_ok
+call :free_mb
+if not defined FREE_MB goto space_ok
+if %FREE_MB% GEQ 2048 goto space_ok
+goto no_space
+:space_ok
 
 rem ---- step 1: uv -------------------------------------------------------------------------
 echo.
@@ -185,14 +205,14 @@ echo.
 echo  [4 of 6] Installing the speech tools (about 100 MB download from pypi.org) ...
 "%UV%" pip install --python "%PY%" -r "%TOOLS%\requirements.txt"
 if errorlevel 1 goto net_fail
-rem Can every package really start on this PC? Finding out now saves the 1.2 GB model download below.
+rem Can every package really start on this PC? Finding out now saves the 1.1 GB model download below.
 "%PY%" "%TOOLS%\transcribe.py" --check-packages
 if errorlevel 1 goto pkg_fail
 echo        done.
 
 rem ---- step 5: models ---------------------------------------------------------------------
 echo.
-echo  [5 of 6] Downloading the speech models from huggingface.co. This is the big one: about 1.2 GB, once.
+echo  [5 of 6] Downloading the speech models from huggingface.co. This is the big one: about 1.1 GB, once.
 echo           A progress bar is shown for each file. If it stops, run this file again:
 echo           it continues where it left off. Models that are already complete are not downloaded again.
 echo.
@@ -230,8 +250,9 @@ if exist "%TOOLS%\setup-autostart-windows.bat" goto done_auto
 echo   Start it by hand each time: double-click "start-helper-windows.bat"
 echo   (in this same folder) and leave its window open while you work in
 echo   Video Redline.
-echo   (Windows can also start the helper by itself when you sign in. That comes
-echo   with the Video Redline app download; this folder does not have it.)
+echo   (Windows can also start the helper by itself when you sign in. The file for that
+echo   belongs to the Video Redline download, but this folder does not have it:
+echo   copy the complete tools folder from the download to use it.)
 goto done_other
 :done_auto
 echo   Next: double-click "setup-autostart-windows.bat" in this folder to add the
@@ -288,7 +309,7 @@ pushd "%TOOLS%"
 call .\setup-autostart-windows.bat /yes
 set "AS_RC=%errorlevel%"
 popd
-title Video Redline Tool - one-time setup
+title Video Redline - one-time setup
 if "%AS_RC%"=="0" goto autostart_done
 echo.
 echo   Setup itself is finished. The automatic start did not finish: read the lines above to see why. You can run
@@ -297,7 +318,7 @@ echo   If the lines above say that other people can change this folder, or that 
 echo   move the whole Video Redline folder (the one that has video-redline.html and the tools folder inside it)
 echo   into your own user folder (for example "%EXAMPLE%"), run setup-windows.bat there once,
 echo   and say yes to the question at its end.
-echo   Before you move it, double-click stop-helper-windows.bat if this folder has that file, because
+echo   Before you move it, double-click stop-helper-windows.bat, because
 echo   Windows will not move a folder while the helper runs from it.
 goto end
 
@@ -312,7 +333,9 @@ echo   PROBLEM: this file was opened from INSIDE the zip download. Windows unpac
 echo            and leaves the rest of the tool behind in the zip, so setup cannot work from here.
 echo   WHAT TO DO:
 echo     1. Close this window.
-echo     2. Find the zip file you downloaded, right-click it, choose "Extract All..." and click Extract.
+echo     2. Find the zip file you downloaded, right-click it, choose "Extract All...", click Browse, pick the folder
+echo        VideoRedline inside your own user folder (for example "%EXAMPLE%"), and click Extract.
+echo        (Make that folder first if it is not there.)
 echo     3. Open the new folder that appears, then the folder called tools inside it, and double-click "setup-windows.bat" there.
 goto fail_end
 
@@ -343,11 +366,20 @@ echo   PROBLEM: this version of Windows has no "curl" program (it is built in to
 echo   WHAT TO DO: run Windows Update, or ask your IT person to run setup for you.
 goto fail_end
 
+:no_space
+echo.
+echo   PROBLEM: the drive this folder is on has only about %FREE_MB% MB free. Setup needs about 2 GB (it downloads 1.3 GB).
+echo   WHAT TO DO: free up some space on that drive (empty the Recycle Bin, delete files you do not need), then
+echo   double-click this file again. Nothing was downloaded.
+goto fail_end
+
 :net_fail
 echo.
 echo   PROBLEM: a download failed.
 echo   WHAT TO DO: check that this computer is connected to the internet and that a firewall or VPN is not blocking
-echo   github.com, pypi.org and huggingface.co. Then double-click this file again - it picks up where it stopped.
+echo   github.com, githubusercontent.com, pypi.org, pythonhosted.org, huggingface.co or hf.co (each site passes
+echo   the files on to a file server of its own). Then double-click this file again - it picks up where it stopped.
+call :space_note
 goto fail_end
 
 :hash_fail
@@ -367,7 +399,9 @@ goto fail_end
 :model_fail
 echo.
 echo   PROBLEM: the speech models could not be downloaded completely.
-echo   WHAT TO DO: check the internet connection and run this file again. It continues where it left off.
+echo   WHAT TO DO: check the internet connection (and that a firewall or VPN is not blocking huggingface.co or hf.co, the
+echo   file server the models come from) and run this file again. It continues where it left off.
+call :space_note
 goto fail_end
 
 :test_fail
@@ -406,8 +440,8 @@ echo   into your own user folder (for example "%EXAMPLE%"), and run
 echo   setup-windows.bat from there.
 echo.
 echo   If a Video Redline helper already runs from this folder (it may run without a
-echo   window), double-click stop-helper-windows.bat first, if this folder has that
-echo   file: Windows will not move a folder while the helper runs from it.
+echo   window), double-click stop-helper-windows.bat first: Windows will not move a
+echo   folder while the helper runs from it.
 echo.
 echo   To stop now, just press Enter. To go on anyway, type C and press Enter.
 echo  ---------------------------------------------------------------------
@@ -426,7 +460,7 @@ if /i "%ANS%"=="continue" goto sync_go
 echo.
 echo   Setup was stopped. Nothing was downloaded and nothing was changed.
 echo   Move the whole Video Redline folder (the one that has video-redline.html and the tools folder inside it) into your own user folder (for example "%EXAMPLE%") and run setup-windows.bat from there.
-echo   Before you move it, double-click stop-helper-windows.bat if this folder has that file, because Windows will not move a folder while the helper runs from it.
+echo   Before you move it, double-click stop-helper-windows.bat, because Windows will not move a folder while the helper runs from it.
 goto fail_end
 
 :sync_go
@@ -446,7 +480,7 @@ exit /b 0
 
 rem ---- subroutine: end a helper that may be running (hidden) from this folder, before the working space is repaired ----------
 rem Such a helper holds files of venv and python, so a repair or rebuild would fail or be left half done. stop-helper-windows.bat
-rem (a separate file of the automatic start; it stops only the helper of THIS folder) is called when it is in this folder; if
+rem (one of the Windows start-up files; it stops only the helper of THIS folder) is called when it is in this folder; if
 rem not, there is nothing to call and the person is only told what to do. Either way setup goes on.
 :stop_helper
 if exist "%TOOLS%\stop-helper-windows.bat" goto stop_call
@@ -464,7 +498,7 @@ pushd "%TOOLS%"
 call .\stop-helper-windows.bat
 popd
 endlocal
-title Video Redline Tool - one-time setup
+title Video Redline - one-time setup
 exit /b 0
 
 rem ---- subroutine: does the folder path contain this name? (case does not matter) ------------------
@@ -472,4 +506,23 @@ rem %1 = the name to look for (in quotes), %2 = what to call it. Sets SYNC_LABEL
 :sync_key
 set VRT_CHECK_PATH | findstr /i /c:%1 >nul 2>&1
 if not errorlevel 1 if not defined SYNC_LABEL set "SYNC_LABEL=%~2"
+exit /b 0
+
+rem ---- subroutine: whole megabytes free on the drive of this folder -> FREE_MB (empty when it cannot be read) ----------
+:free_mb
+set "FREE_MB="
+if defined VRT_TEST_FREE_MB set "FREE_MB=%VRT_TEST_FREE_MB%"
+if not defined VRT_TEST_FREE_MB if "%TOOLS:~1,1%"==":" for /f "usebackq delims=" %%A in (`powershell -NoProfile -NonInteractive -Command "try { [math]::Floor([IO.DriveInfo]::new('%TOOLS:~0,2%').AvailableFreeSpace / 1MB) } catch { }" 2^>nul`) do set "FREE_MB=%%A"
+if not defined FREE_MB exit /b 0
+echo %FREE_MB%| findstr /r "^[0-9][0-9]*$" >nul || set "FREE_MB="
+exit /b 0
+
+rem ---- subroutine: a nearly full drive is said out loud after a failed download ---------------------------------------
+:space_note
+call :free_mb
+if not defined FREE_MB exit /b 0
+if %FREE_MB% GEQ 1024 exit /b 0
+echo.
+echo   NOTE: the drive this folder is on has only about %FREE_MB% MB free. A nearly full drive also makes downloads fail:
+echo   free up some space (setup needs about 2 GB), then run this file again.
 exit /b 0

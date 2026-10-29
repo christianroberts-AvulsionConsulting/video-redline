@@ -1,12 +1,12 @@
 @echo off
 rem ============================================================================================
-rem  Video Redline Tool - start the helper (Windows)
+rem  Video Redline - start the helper (Windows)
 rem  Double-click this file, then LEAVE ITS WINDOW OPEN while you use the Video Redline page.
-rem  The page can then make a transcript for you with one click ("Create transcript").
+rem  The page can then make a transcript for you with one click ("Create transcript and find cuts").
 rem  Everything stays on your computer. To stop the helper, simply close this window.
 rem  (If a helper is ALREADY running, in another window or hidden, this window only says so; closing it stops nothing.)
-rem  This file is the hand start, the way that always works. With setup-autostart-windows.bat (a separate file of the Video Redline
-rem  app, in this same folder) the helper starts by itself, hidden, at every sign-in, and the "Video Redline" icon on the Desktop
+rem  This file is the hand start, the way that always works. With setup-autostart-windows.bat (in this same folder) the helper
+rem  starts by itself, hidden, at every sign-in, and the "Video Redline" icon on the Desktop
 rem  starts it first if needed and opens the page: for most people that icon is the way to open Video Redline.
 rem ============================================================================================
 setlocal EnableExtensions DisableDelayedExpansion
@@ -27,6 +27,7 @@ set "PY=%TOOLS%\venv\Scripts\python.exe"
 set "HF_HOME=%TOOLS%\hf-cache"
 set "HF_HUB_OFFLINE=1"
 set "HF_HUB_DISABLE_TELEMETRY=1"
+set "ORT_DISABLE_TELEMETRY=1"
 set "HF_HUB_DISABLE_SYMLINKS_WARNING=1"
 set "PYTHONUTF8=1"
 
@@ -37,6 +38,14 @@ if /i "%FOLDERNAME:~-4%"==".zip" goto in_zip
 if /i "%FOLDERNAME:~0,4%"=="Temp" if /i "%FOLDERNAME:~5,1%"=="_" goto in_zip
 if /i "%FOLDERNAME:~0,3%"=="7zO" goto in_zip
 if /i "%FOLDERNAME:~0,6%"=="Rar$EX" goto in_zip
+rem (Explorer unpacks a single file together with its folder: <zip>\tools\<file>, so the folder above can be the zip)
+for %%I in ("%TOOLS%\..") do set "PARENTDIR=%%~fI"
+set "PARENTNAME=-"
+for %%I in ("%PARENTDIR%") do if not "%%~nxI"=="" set "PARENTNAME=%%~nxI"
+if /i "%PARENTNAME:~-4%"==".zip" goto in_zip
+if /i "%PARENTNAME:~0,4%"=="Temp" if /i "%PARENTNAME:~5,1%"=="_" goto in_zip
+if /i "%PARENTNAME:~0,3%"=="7zO" goto in_zip
+if /i "%PARENTNAME:~0,6%"=="Rar$EX" goto in_zip
 if not exist "%TOOLS%\transcribe.py" goto not_extracted
 if not exist "%TOOLS%\vrt_server.py" goto not_extracted
 
@@ -101,7 +110,8 @@ endlocal & exit /b %RC%
 echo.
 echo   PROBLEM: this file was opened from INSIDE the zip download. Windows unpacks only this one file
 echo            and leaves the rest of the tool behind in the zip.
-echo   WHAT TO DO: close this window, right-click the zip file you downloaded, choose "Extract All...", and use
+echo   WHAT TO DO: close this window, right-click the zip file you downloaded, choose "Extract All...", click Browse,
+echo   pick the folder VideoRedline inside your own user folder (make it first if it is not there), click Extract, and use
 echo   the files in the NEW folder. Run "setup-windows.bat" there first.
 goto end_fail
 

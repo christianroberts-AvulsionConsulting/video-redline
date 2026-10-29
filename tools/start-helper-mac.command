@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================================
-#  Video Redline Tool - start the helper (Mac)         *** NOT TESTED ON A MAC ***
+#  Video Redline - start the helper (Mac)         *** NOT TESTED ON A MAC ***
 #
 #  To start it: open Terminal (press Command + Space, type Terminal, press Return), type   bash   and a space, drag
 #  this file (start-helper-mac.command) into the Terminal window, then press Return. Then LEAVE THAT WINDOW OPEN
@@ -22,6 +22,7 @@ PY="$TOOLS/venv/bin/python"
 export HF_HOME="$TOOLS/hf-cache"
 export HF_HUB_OFFLINE=1
 export HF_HUB_DISABLE_TELEMETRY=1
+export ORT_DISABLE_TELEMETRY=1
 export HF_HUB_DISABLE_SYMLINKS_WARNING=1
 export PYTHONUTF8=1
 

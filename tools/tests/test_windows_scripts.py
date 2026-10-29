@@ -32,12 +32,17 @@ HAVE_INSTALL = os.path.isfile(os.path.join(REAL, "venv", "Scripts", "python.exe"
     os.path.isfile(os.path.join(REAL, "uv", "uv.exe")) and os.path.isdir(os.path.join(REAL, "hf-cache", "hub"))
 
 
+# The Windows start-up files of the Video Redline app. In the repository they lie next to the files of this package. A test folder never gets
+# them by copy_code(): the stand-ins (stub) are written where a test needs them, and test_2d copies the real ones on purpose.
+STARTUP_FILES = ("setup-autostart-windows.bat", "remove-autostart-windows.bat", "stop-helper-windows.bat", "add-desktop-icon-windows.bat")
+
+
 def code_files():
     """The files of the code under test that a user has next to the batch files (not the install)."""
     out = []
     for name in sorted(os.listdir(TOOLS)):
         full = os.path.join(TOOLS, name)
-        if os.path.isfile(full) and (name.endswith((".py", ".bat", ".command", ".txt"))):
+        if os.path.isfile(full) and (name.endswith((".py", ".bat", ".command", ".txt"))) and name not in STARTUP_FILES:
             out.append(name)
     return out
 
@@ -156,6 +161,31 @@ class ZipAndQuotingTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("Extract All", out)
         self.assertNotIn("setup has not been run", out)
+
+    def test_a_file_opened_from_inside_the_zip_lies_in_a_tools_folder_inside_the_zip_folder(self):
+        """Round 3e (item 16). Explorer unpacks a single file together with its folder inside the zip: ...\\Temp1_<zip>.zip\\tools\\<file>. The folder
+        is called tools, so its parent's name has to be looked at as well."""
+        wav = make_wav(os.path.join(self.root, "a.wav"))
+        for name in ("setup-windows.bat", "start-helper-windows.bat", "transcribe-windows.bat"):
+            for parent in ("Temp1_Video Redline.zip", "Temp3_download.zip", "7zO1A2B3C4D", "Rar$EX00.123", "my download.ZIP"):
+                folder = os.path.join(self.root, parent, "tools")
+                os.makedirs(folder, exist_ok=True)
+                shutil.copy2(os.path.join(TOOLS, name), folder)
+                code, out = run_bat(os.path.join(folder, name), [wav] if name.startswith("transcribe") else [])
+                self.assertEqual(code, 1, (name, parent, out))
+                self.assertIn("INSIDE the zip", out, (name, parent))
+                self.assertIn("Extract All", out, (name, parent))
+                self.assertFalse(os.path.exists(os.path.join(folder, "uv")), "nothing may be downloaded from inside the zip")
+
+    def test_a_tools_folder_inside_an_ordinary_folder_is_not_taken_for_a_zip(self):
+        for parent in ("my videos", "Template_1", "Tempo", "zip"):                      # (names that merely look a little like the zip folders)
+            folder = os.path.join(self.root, parent, "tools")
+            os.makedirs(folder, exist_ok=True)
+            shutil.copy2(os.path.join(TOOLS, "setup-windows.bat"), folder)
+            code, out = run_bat(os.path.join(folder, "setup-windows.bat"))
+            self.assertEqual(code, 1, out)
+            self.assertNotIn("INSIDE the zip", out, parent)
+            self.assertIn("requirements.txt", out, parent)                              # the other files are missing: that message instead
 
     def test_folder_with_ampersand_caret_and_percent_shows_its_name_without_errors(self):
         self.skip_in_a_cloud_folder()
@@ -486,7 +516,7 @@ class AutostartHooksOfSetupTests(unittest.TestCase):
             self.assertNotIn("icon", out.lower())                                      # an icon that this folder cannot add is not promised
             self.assertIn('Start it by hand each time: double-click "start-helper-windows.bat"', out)
             self.assertIn("leave its window open", out)
-            self.assertIn("with the Video Redline app download; this folder does not have it", out)    # said plainly, not as a file to run
+            self.assertIn("belongs to the Video Redline download, but this folder does not have it", " ".join(out.split()))    # said plainly, not as a file to run
             self.assertIn('drag a video onto "transcribe-windows.bat"', out)
             self.assertIn('"Create transcript and find cuts" button in Video Redline', out)
 
@@ -668,15 +698,46 @@ class ScriptTextTests(unittest.TestCase):
             found = [l for l in script_text(name).splitlines() if "the person who invited you to the beta" in l]
             self.assertGreaterEqual(len(found), at_least, name)
 
+    def test_every_start_script_switches_off_the_ort_telemetry(self):
+        """Round 3e (item 1). The onnxruntime that is installed says it reports usage to Microsoft unless ORT_DISABLE_TELEMETRY=1 is set before
+        it starts: every script that can start Python sets it, next to the Hugging Face setting."""
+        first_python = re.compile(r'^\s*(?:VRT_TOOLS="\$TOOLS" )?"(?:%PY%|%UV%|\$PY|\$UV)"')       # the first line that starts the private Python or uv
+        for name in BAT_FILES + COMMAND_FILES:
+            text = script_text(name)
+            lines = text.splitlines()
+            setting = 'set "ORT_DISABLE_TELEMETRY=1"' if name.endswith(".bat") else "export ORT_DISABLE_TELEMETRY=1"
+            self.assertEqual(lines.count(setting), 1, name)
+            starts = [i for i, l in enumerate(lines) if first_python.match(l)]
+            self.assertTrue(starts, name)
+            self.assertLess(lines.index(setting), starts[0], name + ": the setting has to come before the first Python or uv call")
+
+    def test_nothing_says_video_redline_tool(self):
+        """Round 3e (item 7). The product is called Video Redline."""
+        for name in list(BAT_FILES + COMMAND_FILES) + ["transcribe.py", "README.md", "vrt_server.py"]:
+            self.assertNotIn("Video Redline Tool", script_text(name), name)
+
+    def test_the_downloads_name_the_sites_that_hand_the_files_over_and_one_size_for_the_models(self):
+        """Round 3e (items 10 and 13). Setup also reaches the file servers that github.com, pypi.org and huggingface.co pass it on to, and
+        the models are 1.1 GB on both lines (they were 1.2 and 1.1)."""
+        for name in ("setup-windows.bat", "setup-mac.command"):
+            text = script_text(name)
+            self.assertIn("and from the file servers those sites pass you on to", text, name)
+            self.assertNotIn("1.2 GB", text, name)
+            self.assertEqual(text.count("1.1 GB"), 2, name)
+        win = " ".join(echoed("setup-windows.bat").split())
+        self.assertIn("github.com, githubusercontent.com, pypi.org, pythonhosted.org, huggingface.co or hf.co", win)
+        mac = script_text("setup-mac.command")
+        self.assertIn("github.com, githubusercontent.com, pypi.org, pythonhosted.org, huggingface.co or hf.co", mac)
+
     def test_titles_and_banners_say_video_redline(self):
         for name in BAT_FILES + COMMAND_FILES:
             text = script_text(name)
-            self.assertIn("Video Redline Tool - ", text.splitlines()[2], name)                   # the first comment line names the file's job
+            self.assertIn("Video Redline - ", text.splitlines()[2], name)                   # the first comment line names the file's job
             for line in text.splitlines():
                 if line.lower().startswith("title "):
                     self.assertIn("Video Redline", line, name)
-        self.assertIn("echo   Video Redline Tool - one-time setup", script_text("setup-windows.bat"))
-        self.assertIn('echo "  Video Redline Tool - one-time setup (Mac)"', script_text("setup-mac.command"))
+        self.assertIn("echo   Video Redline - one-time setup", script_text("setup-windows.bat"))
+        self.assertIn('echo "  Video Redline - one-time setup (Mac)"', script_text("setup-mac.command"))
         self.assertIn("echo   Starting the Video Redline helper.", script_text("start-helper-windows.bat"))
         self.assertIn('echo "  Starting the Video Redline helper.', script_text("start-helper-mac.command"))
 
@@ -696,7 +757,7 @@ class ScriptTextTests(unittest.TestCase):
         for n, line in enumerate(bat.splitlines(), 1):
             if "user folder" in line and re.match(r"\s*(if .* )?echo", line, re.I):
                 self.assertIn('(for example "%EXAMPLE%")', line, "line %d gives no example: %s" % (n, line.strip()))
-        self.assertEqual(bat.count('your own user folder (for example "%EXAMPLE%")'), 4)                  # long path, cloud question, stopped, refused start
+        self.assertEqual(bat.count('your own user folder (for example "%EXAMPLE%")'), 5)                  # long path, cloud question, stopped, refused start, unpack from the zip
         # the Mac: five places in setup-mac.command, one each in the other two
         for name, at_least in (("setup-mac.command", 5), ("start-helper-mac.command", 1), ("transcribe-mac.command", 1)):
             found = [l for l in script_text(name).splitlines() if "~/VideoRedline" in l]
@@ -732,8 +793,10 @@ class ScriptTextTests(unittest.TestCase):
         text = echoed("setup-windows.bat")
         why = "Windows will not move a folder while the helper runs from it."
         self.assertEqual(text.count(why), 3)
-        self.assertEqual(text.count("stop-helper-windows.bat first, if this folder has that file: " + why), 1)
-        self.assertEqual(text.count("Before you move it, double-click stop-helper-windows.bat if this folder has that file, because " + why), 2)
+        # (round 3e: the file is part of the download, so there is no 'if this folder has that file')
+        self.assertEqual(text.count("stop-helper-windows.bat first: " + why), 1)
+        self.assertEqual(text.count("Before you move it, double-click stop-helper-windows.bat, because " + why), 2)
+        self.assertNotIn("has that file", text)
         for at in [m.start() for m in re.finditer(re.escape(why), text)]:
             self.assertIn("stop-helper-windows.bat", text[max(0, at - 160):at], text[max(0, at - 160):at + 80])
 
@@ -899,6 +962,163 @@ class MacFolderAdviceRunTests(unittest.TestCase):
                       "setup-mac.command from there.", flat)
         self.assertNotIn("the whole folder", flat)
         self.assertNotIn("C:\\", out)
+
+
+@unittest.skipUnless(WIN, "Windows batch files")
+class FreeSpaceCheckTests(unittest.TestCase):
+    """Round 3e (item 14). A fresh install needs about 2 GB: setup-windows.bat says so before the big download instead of blaming the internet.
+    VRT_TEST_FREE_MB is the test switch for 'this many MB are free'; the real PowerShell reading runs when it is not set."""
+
+    def setUp(self):
+        self.root = os.path.join(SCRATCH, "bat-space")
+        safe_delete(self.root)
+        os.makedirs(self.root)
+        self.addCleanup(safe_delete, self.root)
+        if cloud_named(self.root):
+            self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
+        self.folder = os.path.join(self.root, "tools")
+        copy_code(self.folder)
+
+    def setup(self, **extra):
+        return run_bat(os.path.join(self.folder, "setup-windows.bat"), env=base_env(**extra))
+
+    def test_a_fresh_install_with_less_than_2_gb_free_is_stopped_before_any_download(self):
+        for mb in ("500", "0", "2047"):
+            code, out = self.setup(VRT_TEST_FREE_MB=mb)
+            flat = " ".join(out.split())
+            self.assertEqual(code, 1, out)
+            self.assertIn("PROBLEM: the drive this folder is on has only about %s MB free. Setup needs about 2 GB (it downloads 1.3 GB)." % mb, flat)
+            self.assertIn("WHAT TO DO: free up some space on that drive (empty the Recycle Bin, delete files you do not need), then double-click this file again. Nothing was downloaded.", flat)
+            self.assertNotIn("[1 of 6]", out)
+            self.assertFalse(os.path.exists(os.path.join(self.folder, "uv")))
+
+    def test_2_gb_or_more_goes_on_and_a_failed_download_is_then_blamed_on_the_internet_only(self):
+        for mb in ("2048", "50000", "not a number", ""):
+            code, out = self.setup(VRT_TEST_FREE_MB=mb)
+            self.assertIn("[1 of 6]", out, (mb, out))
+            self.assertIn("PROBLEM: a download failed.", out, mb)
+            self.assertNotIn("has only about", out, mb)
+            self.assertNotIn("is not recognized", out, mb)
+
+    def test_a_repair_with_the_models_already_there_is_never_stopped_by_the_check_but_a_failed_download_names_the_full_drive(self):
+        os.makedirs(os.path.join(self.folder, "hf-cache", "hub"))
+        code, out = self.setup(VRT_TEST_FREE_MB="300")
+        flat = " ".join(out.split())
+        self.assertIn("[1 of 6]", out)                                                       # the check was skipped
+        self.assertIn("PROBLEM: a download failed.", out)
+        self.assertIn("NOTE: the drive this folder is on has only about 300 MB free. A nearly full drive also makes downloads fail: "
+                      "free up some space (setup needs about 2 GB), then run this file again.", flat)
+        self.assertLess(out.index("PROBLEM: a download failed."), out.index("NOTE: the drive"))
+
+    def test_the_real_reading_of_the_free_space_works_and_says_nothing_on_a_roomy_drive(self):
+        if shutil.disk_usage(self.root).free < 4 * 1024 ** 3:
+            self.skipTest("this drive has less than 4 GB free")
+        code, out = self.setup()                                                             # no test switch: PowerShell reads the drive
+        self.assertIn("[1 of 6]", out, out)
+        self.assertNotIn("has only about", out)
+        for bad in ("is not recognized", "unexpected at this time", "Exception", "Cannot find"):
+            self.assertNotIn(bad, out)
+
+    def test_a_folder_name_with_odd_characters_does_not_break_the_reading(self):
+        odd = os.path.join(self.root, "Tom & Jerry ^ (1) 5%", "tools")
+        copy_code(odd)
+        code, out = run_bat(os.path.join(odd, "setup-windows.bat"), env=base_env(VRT_TEST_FREE_MB="100"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("has only about 100 MB free", out)
+        if shutil.disk_usage(self.root).free > 4 * 1024 ** 3:
+            code, out = run_bat(os.path.join(odd, "setup-windows.bat"), env=base_env())
+            self.assertIn("[1 of 6]", out, out)
+            self.assertNotIn("has only about", out)
+
+
+@unittest.skipUnless(find_bash(), NO_BASH)
+class MacVersionCheckTests(unittest.TestCase):
+    """Round 3e (item 4): setup-mac.command reads `sw_vers -productVersion` right after the kind-of-Mac check and stops, before anything is
+    downloaded, on a macOS that is too old for the pinned packages (Apple Silicon: 14, Intel: 13). Run with stand-ins for uname, sw_vers and
+    curl placed first on the PATH (the curl stand-in fails at once, so nothing can be downloaded)."""
+
+    def setUp(self):
+        self.root = os.path.join(SCRATCH, "mac-version")
+        safe_delete(self.root)
+        os.makedirs(os.path.join(self.root, "bin"))
+        os.makedirs(os.path.join(self.root, "home"))
+        self.addCleanup(safe_delete, self.root)
+        self.tools = os.path.join(self.root, "plain", "tools")
+        copy_code(self.tools)
+        stubs = {"uname": '#!/bin/bash\nif [ "$1" = "-m" ]; then echo "$STUB_ARCH"; else exec /usr/bin/uname "$@"; fi\n',
+                 "sw_vers": '#!/bin/bash\n[ "$STUB_MACOS" = "none" ] && exit 1\necho "$STUB_MACOS"\n',
+                 "curl": '#!/bin/bash\necho "stub curl was called" >&2\nexit 1\n'}
+        for name, text in stubs.items():
+            with open(os.path.join(self.root, "bin", name), "w", newline="\n") as f:
+                f.write(text)
+
+    def run_setup(self, arch, macos, **extra):
+        env = dict(os.environ, VRT_NO_PAUSE="1", STUB_ARCH=arch, STUB_MACOS=macos, HOME=os.path.join(self.root, "home").replace("\\", "/"),
+                   PATH=os.path.join(self.root, "bin") + os.pathsep + os.environ.get("PATH", ""), **extra)
+        r = subprocess.run([find_bash(), os.path.join(self.tools, "setup-mac.command").replace("\\", "/")], input=b"", stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, env=env, timeout=120)
+        out = r.stdout.decode("utf-8", errors="replace")
+        return r.returncode, out, " ".join(out.split())
+
+    def test_an_apple_silicon_mac_with_macos_13_or_older_is_stopped_before_any_download(self):
+        if cloud_named(self.root):
+            self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
+        for version in ("13.6", "12.7.4", "10.15.7"):
+            code, out, flat = self.run_setup("arm64", version)
+            self.assertEqual(code, 1, out)
+            self.assertIn("PROBLEM: This Mac runs macOS %s, which is too old." % version, flat)
+            self.assertIn("need macOS 14 or newer; this beta has no version of them for an older macOS. Nothing was downloaded.", flat)
+            self.assertIn("WHAT TO DO: Update macOS to version 14 or newer (Apple menu, then System Settings, General, Software Update; "
+                          "on macOS 12 and older it is System Preferences, Software Update)", flat)
+            self.assertIn("tell the person who invited you to the beta", flat)
+            self.assertNotIn("[1 of 6]", out)                                            # stopped before the first step
+            self.assertNotIn("stub curl", out)
+            self.assertFalse(os.path.exists(os.path.join(self.tools, "uv")))
+
+    def test_an_intel_mac_needs_macos_13_and_the_text_says_that_no_intel_mac_has_tried_it(self):
+        if cloud_named(self.root):
+            self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
+        code, out, flat = self.run_setup("x86_64", "12.7")
+        self.assertEqual(code, 1, out)
+        self.assertIn("The speech tools for an Intel Mac need macOS 13 or newer (that is what their files say; nobody has tried them on an Intel Mac yet)", flat)
+        self.assertIn("Update macOS to version 13 or newer if your Mac offers it", flat)
+        self.assertIn("this beta has no version of them for an older macOS", flat)
+        self.assertNotIn("[1 of 6]", out)
+
+    def test_new_enough_or_unknown_versions_go_on_to_step_1(self):
+        if cloud_named(self.root):
+            self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
+        for arch, version in (("arm64", "14.0"), ("arm64", "15.1"), ("arm64", "26.0"), ("x86_64", "13.0"), ("arm64", "none"), ("arm64", "garbage")):
+            code, out, flat = self.run_setup(arch, version)
+            self.assertIn("[1 of 6]", out, (arch, version, out))                         # went on, and only the stand-in curl said no
+            self.assertNotIn("too old", flat, (arch, version))
+            self.assertIn("stub curl was called", out)
+
+    def test_a_nearly_full_drive_is_said_before_the_download_and_after_a_failure(self):
+        """Round 3e (item 14), the Mac side: 2 GB for a fresh install; with the models already there only the failure names the drive."""
+        if cloud_named(self.root):
+            self.skipTest("this checkout lies in a cloud-looking folder, so setup stops at its folder question first")
+        code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="500")
+        self.assertEqual(code, 1, out)
+        self.assertIn("PROBLEM: The drive this folder is on has only about 500 MB free. Setup needs about 2 GB (it downloads 1.3 GB). Nothing was downloaded.", flat)
+        self.assertEqual(flat.count("has only about 500 MB free"), 1, out)                    # said once, not again as a NOTE
+        self.assertIn("WHAT TO DO: Free up some space on that drive (empty the Trash, delete files you do not need), then run this file again.", flat)
+        self.assertNotIn("[1 of 6]", out)
+        code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="2048")
+        self.assertIn("[1 of 6]", out)
+        self.assertNotIn("has only about", flat)
+        os.makedirs(os.path.join(self.tools, "hf-cache", "hub"))
+        code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="300")
+        self.assertIn("[1 of 6]", out)                                                         # skipped: the models are there
+        self.assertIn("PROBLEM: A download failed.", flat)
+        self.assertIn("NOTE: the drive this folder is on has only about 300 MB free. A nearly full drive makes things fail: free up some space (setup needs about 2 GB), then run this file again.", flat)
+        code, out, flat = self.run_setup("arm64", "15.1", VRT_TEST_FREE_MB="lots")
+        self.assertNotIn("has only about", flat)
+
+    def test_the_check_comes_after_the_kind_of_mac_and_before_the_first_download(self):
+        text = script_text("setup-mac.command")
+        self.assertLess(text.index('ARCH="$(uname -m)"'), text.index("sw_vers -productVersion"))
+        self.assertLess(text.index("sw_vers -productVersion"), text.index("# ---- step 1: uv"))
 
 
 # stand-ins for the helper (it ends with the code in STUB_RC) and for the check of the private Python: start-helper-windows.bat then
@@ -1138,7 +1358,30 @@ class SandboxInstallTests(unittest.TestCase):
         with open(os.path.join(folder, "ran-%s.txt" % name), "rb") as f:
             return f.read().decode("ascii").strip()
 
+    def test_2d_the_real_startup_files_pass_their_own_dry_run_when_setup_offers_them(self):
+        """Round 3e (item 15c). With the real files of the repository in the folder (they are not in this package's own folder), the offer at the end
+        of setup runs the REAL setup-autostart-windows.bat. It is renamed and a one-line wrapper with that name calls it with /yes /dryrun, so it
+        only checks and shows what it would write: the real file writes a start-up setting for the Windows user, which a test must never do."""
+        need = ("setup-autostart-windows.bat", "helper_launcher.pyw", "open_video_review.pyw")
+        if not all(os.path.isfile(os.path.join(TOOLS, n)) for n in need):
+            self.skipTest("the real start-up files are not next to these tools (they come with the repository)")
+        for n in need + tuple(x for x in STARTUP_FILES if os.path.isfile(os.path.join(TOOLS, x))):
+            shutil.copy2(os.path.join(TOOLS, n), self.dir)
+        self.addCleanup(lambda: [os.remove(os.path.join(self.dir, n)) for n in need + STARTUP_FILES + ("real-autostart.bat",)
+                                 if os.path.exists(os.path.join(self.dir, n))])
+        real = os.path.join(self.dir, "real-autostart.bat")
+        os.replace(os.path.join(self.dir, "setup-autostart-windows.bat"), real)
+        stub(os.path.join(self.dir, "setup-autostart-windows.bat"), '@echo off\ncall "%~dp0real-autostart.bat" /yes /dryrun\nexit /b %errorlevel%\n')
+        env = self.env()
+        env.pop("VRT_NO_PAUSE", None)                                                          # a person is at the keyboard
+        code, out = run_bat_typing(os.path.join(self.dir, "setup-windows.bat"), b"y\r\n", "Start the helper by itself? (Y = yes, Enter = no)", env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("DRY RUN: everything checks out", out)
+        self.assertIn("Nothing was changed and nothing was started.", out)
+        self.assertNotIn("is not recognized", out)
+
     def test_3_moved_folder_is_noticed_by_the_launcher_and_repaired_by_setup(self):
+        self.remove_stubs(self.dir)                                    # (round 3e: it no longer depends on what the tests before it left)
         moved = os.path.join(self.root, "Tom & Jerry ^ moved tools")
         os.rename(self.dir, moved)
         if True:

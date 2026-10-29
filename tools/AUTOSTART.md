@@ -86,7 +86,7 @@ The helper has no window, so it writes a short log: `logs\helper.log` in the `to
 
 ## Your privacy
 
-- **Nothing leaves your computer.** The helper listens only on your own computer. Other computers cannot reach it. It never uses the internet while it makes a transcript.
+- **Your video stays on your computer.** The helper listens only on your own computer. Other computers cannot reach it. It does not use the internet while it makes a transcript, and the helper itself sends nothing anywhere. The speech engine it uses (Microsoft's ONNX Runtime) has usage reporting of its own, and the helper asks it to stop as far as that can be asked; `tools/README.md` says what that means on Windows and on a Mac.
 - **A copy of your video, and of its sound, is kept in this folder only while a transcript is being made.** Then it is deleted. If the helper is stopped in the middle, the leftover copy is deleted when you run `stop-helper-windows.bat` or `remove-autostart-windows.bat`, or the next time the helper starts.
 - **Any page you open from a file on this computer, and any program on this computer, can ask the helper to make a transcript.** There is no password. A hostile web page could also try to use it: it cannot read your files, and your browser may ask before a page may connect. The helper cannot read your other files, start other programs or change settings. It stops a job when your disk is filling up, when nobody has asked about the job for 10 minutes, or after 3 hours. If a page ever keeps the helper busy, `stop-helper-windows.bat` clears that. See `README-helper-security.md`.
 - Because the helper now runs all the time, not only while a window is open, it is **worth keeping the folder in a safe place** (see "Where to keep the folder").

@@ -6786,7 +6786,11 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
  *                                      automatic start; the advice for a helper that is busy or lost says how a stopped helper
  *                                      starts again (for a Mac as well: the Terminal recipe, or "the same way as before"); the step for
  *                                      the hand start begins "On Windows"; and the advice after a failure says "the person who invited
- *                                      you to the beta". The Mac recipe is the same as before.)
+ *                                      you to the beta". The Mac recipe is the same as before.
+ *                                      Since 1.0.4 a browser whose user agent is not Windows (a Mac) gets the Terminal recipe first and no
+ *                                      sentence about icons or .bat files; without a browser user agent (Node, tests) or on Windows the texts are
+ *                                      the ones above. A failed job whose reason is the plain word 'failed' keeps the helper's own message on
+ *                                      err.message, and err.help is then only what to do next.)
  *
  *   options    (all optional): { parakeet: 'v2'|'v3', whisper: 'small.en'|..., noWhisper: bool, noParakeet: bool, threads: int }
  *   onProgress({ phase: 'checking'|'uploading'|'transcribing'|'finishing', percent: 0..100 (whole operation: the upload
@@ -6817,7 +6821,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
 }(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function (root) {
   'use strict';
 
-  var VERSION = '1.0.3';
+  var VERSION = '1.0.4';
   var HELPER_ID = 'video-review-helper';
   var DEFAULT_PORTS = [47831, 47832, 47833, 47834, 47835];
   var UPLOAD_SHARE = 15;        /* percent of the whole operation */
@@ -6826,15 +6830,18 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
   var DEFAULT_MAX_BYTES = 6 * 1024 * 1024 * 1024;
   var ALLOWED_OPTIONS = ['parakeet', 'whisper', 'noWhisper', 'noParakeet', 'threads'];
 
+  /* What to do after a job failed inside the helper without a cause of its own (the helper's message says what went wrong). */
+  var FAILED_NEXT = 'Try once more. If it keeps failing, try a shorter recording, or send the text in the helper window (or, if the helper has no window, the files in the logs folder of the tools folder) to the person who invited you to the beta.';
+
   var HELP = {
-    'no-helper': 'Start the helper: on Windows, double-click the Video Redline icon on your Desktop (it starts the helper and opens Video Redline in a new page that you can close). On a Mac: open Terminal, type bash and a space, drag start-helper-mac.command into the window, then press Return. On Windows, if there is no such icon yet, open the tools folder and double-click setup-autostart-windows.bat once: it adds the icon and makes the helper start by itself at every sign-in. On Windows, if you would rather not use the automatic start, double-click start-helper-windows.bat in the tools folder each time and leave its window open. Leave the helper running (if it has a window, do not close it), then come back to this page and click Create transcript again.',
-    'busy': 'The helper is already making another transcript. Wait until it has finished, then click Create transcript again. If that transcript was started by a page that you have since closed or reloaded, the helper stops it by itself after about 10 minutes; to stop it right now, close the helper window (if you started the helper by hand) or, on Windows, double-click stop-helper-windows.bat in the tools folder. If you stopped the helper, start it again: on Windows, double-click the Video Redline icon on your Desktop (or start-helper-windows.bat, if you started it by hand). On a Mac: open Terminal, type bash and a space, drag start-helper-mac.command into the window, then press Return. Then click Create transcript again.',
-    'not-ready': 'Open the tools folder and double-click setup-windows.bat. On a Mac: open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE. Then start the helper again and click Create transcript again.',
-    'disk-full': 'There is not enough free space on this computer\'s drive for this recording. Free up some space (about 1.5 times the size of the video, and at least 1 GB more), or try a shorter recording, then click Create transcript again.',
-    'cancelled': 'You cancelled it. Nothing was kept. Click Create transcript to start again.',
-    'failed': 'Something went wrong while making the transcript. Try once more. If it keeps failing, try a shorter recording, or send the text in the helper window (or, if the helper has no window, the files in the logs folder of the tools folder) to the person who invited you to the beta.',
+    'no-helper': 'Start the helper: on Windows, double-click the Video Redline icon on your Desktop (it starts the helper and opens Video Redline in a new page that you can close). On a Mac: open Terminal, type bash and a space, drag start-helper-mac.command into the window, then press Return. On Windows, if there is no such icon yet, open the tools folder and double-click setup-autostart-windows.bat once: it adds the icon and makes the helper start by itself at every sign-in. On Windows, if you would rather not use the automatic start, double-click start-helper-windows.bat in the tools folder each time and leave its window open. Leave the helper running (if it has a window, do not close it), then come back to this page and click Create transcript and find cuts again.',
+    'busy': 'The helper is already making another transcript. Wait until it has finished, then click Create transcript and find cuts again. If that transcript was started by a page that you have since closed or reloaded, the helper stops it by itself after about 10 minutes; to stop it right now, close the helper window (if you started the helper by hand) or, on Windows, double-click stop-helper-windows.bat in the tools folder. If you stopped the helper, start it again: on Windows, double-click the Video Redline icon on your Desktop (or start-helper-windows.bat, if you started it by hand). On a Mac: open Terminal, type bash and a space, drag start-helper-mac.command into the window, then press Return. Then click Create transcript and find cuts again.',
+    'not-ready': 'Open the tools folder and double-click setup-windows.bat. On a Mac: open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE. Then start the helper again and click Create transcript and find cuts again.',
+    'disk-full': 'There is not enough free space on this computer\'s drive for this recording. Free up some space (about 1.5 times the size of the video, and at least 1 GB more), or try a shorter recording, then click Create transcript and find cuts again.',
+    'cancelled': 'You cancelled it. Nothing was kept. Click Create transcript and find cuts to start again.',
+    'failed': 'Something went wrong while making the transcript. ' + FAILED_NEXT,
     'too-big': 'This file is too large for the helper (the limit is about 6 GB). Export a smaller or lower-quality copy of the video and try again.',
-    'network': 'The connection to the helper was lost. Make sure the helper is running: on Windows, double-click the Video Redline icon on your Desktop, which starts it again if it has stopped (if you started the helper by hand and closed its window, double-click start-helper-windows.bat again). On a Mac: start it again through Terminal, the same way as before. Then click Create transcript again.'
+    'network': 'The connection to the helper was lost. Make sure the helper is running: on Windows, double-click the Video Redline icon on your Desktop, which starts it again if it has stopped (if you started the helper by hand and closed its window, double-click start-helper-windows.bat again). On a Mac: start it again through Terminal, the same way as before. Then click Create transcript and find cuts again.'
   };
 
   var DEFAULT_MESSAGE = {
@@ -6856,24 +6863,36 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     'out-of-memory': 'The computer ran out of memory. Close other programs and try again. If it keeps happening, try a shorter recording, or ask for the lighter settings (a smaller Whisper model, or no Whisper).'
   };
 
+  /* The same advice for a browser that says it is not Windows (a Mac): the Terminal recipe, and nothing about icons or .bat files. */
+  var MAC_START = 'open Terminal, type bash and a space, drag start-helper-mac.command into the window, then press Return';
+  var FAILED_NEXT_MAC = 'Try once more. If it keeps failing, try a shorter recording, or send the text in the helper\'s Terminal window to the person who invited you to the beta.';
+  var HELP_MAC = {
+    'no-helper': 'Start the helper: ' + MAC_START + '. Leave the helper running (do not close its Terminal window), then come back to this page and click Create transcript and find cuts again.',
+    'busy': 'The helper is already making another transcript. Wait until it has finished, then click Create transcript and find cuts again. If that transcript was started by a page that you have since closed or reloaded, the helper stops it by itself after about 10 minutes; to stop it right now, close the helper\'s Terminal window. If you stopped the helper, start it again: ' + MAC_START + '. Then click Create transcript and find cuts again.',
+    'not-ready': 'Open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE. Then start the helper again and click Create transcript and find cuts again.',
+    'failed': 'Something went wrong while making the transcript. ' + FAILED_NEXT_MAC,
+    'network': 'The connection to the helper was lost. Make sure the helper is running: if you closed its Terminal window, start it again (' + MAC_START + '). Then click Create transcript and find cuts again.'
+  };
+
   /* The helper's "not ready" messages are not all cured by running the setup file. These are the causes it can report
      (vrt_server.py: Readiness.compute, explain_failure); the message itself decides which advice fits. */
   var HELP_NOT_READY = [
     [/still starting up|still checking|just started/i,
-      'Wait a few seconds, then click Create transcript again.'],
+      'Wait a few seconds, then click Create transcript and find cuts again.'],
     [/visual c\+\+|vc_redist/i,
-      'Follow the steps in the message above (install the free Microsoft component), then start the helper again and click Create transcript.'],
+      'Follow the steps in the message above (install the free Microsoft component), then start the helper again and click Create transcript and find cuts.'],
     [/moved, renamed|moved or copied/i,
-      'Double-click setup-windows.bat once more. On a Mac: open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE (setup repairs the folder in under a minute and keeps the speech models). Then start the helper again and click Create transcript again.'],
+      'Double-click setup-windows.bat once more. On a Mac: open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE (setup repairs the folder in under a minute and keeps the speech models). Then start the helper again and click Create transcript and find cuts again.',
+      'Open Terminal, type bash and a space, drag setup-mac.command into the window, then press Return. Wait for ALL DONE (setup repairs the folder in under a minute and keeps the speech models). Then start the helper again and click Create transcript and find cuts again.'],
     /* (the helper is running and re-checks by itself, so nothing is started again: closing a window or starting the helper would
        say "already running" to a person whose helper runs hidden) */
     [/took too long|could not check the speech tools|try starting the helper again/i,
-      'Close other programs that keep the computer busy. Wait a few seconds. Then click Create transcript again.'],
+      'Close other programs that keep the computer busy. Wait a few seconds. Then click Create transcript and find cuts again.'],
     [/files that belong with the helper|complete tools folder/i,
-      'Copy or unzip the complete tools folder (all of its files together). Then start the helper again and click Create transcript again.']
+      'Copy or unzip the complete tools folder (all of its files together). Then start the helper again and click Create transcript and find cuts again.']
   ];
 
-  var HELP_CANCELLED_BY_HELPER = 'The helper stopped this transcript (it had not heard from this page for a while, or it was cancelled somewhere else). Nothing was kept. Click Create transcript to start again.';
+  var HELP_CANCELLED_BY_HELPER = 'The helper stopped this transcript (it had not heard from this page for a while, or it was cancelled somewhere else). Nothing was kept. Click Create transcript and find cuts to start again.';
   var CHECKING_PROBLEM = 'The helper has just started and is still checking the speech tools. Wait a few seconds and try again.';
   /* Shown instead of the helper's own message while a running job gets no answer (so the page does not look frozen).
      cleanup-panel.js (stageLine) has to recognise it by its first words, "Lost contact", to say so on its main status line
@@ -6884,19 +6903,31 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
   var GIVE_UP_AFTER = 6;        /* failed asks in a row before run() gives up: waits of 1.4, 2.8, 4, 4 and 4 s = about 16 s
                                    (about 17 s after the last answer; a frozen helper also makes each ask wait 6 s: about 53 s) */
 
+  /* Windows unless the browser says otherwise: a page without a navigator (Node, the tests), or with a user agent that is not a
+     browser's (Node's own is "Node.js/22"), gets the Windows texts. */
+  function onWindows() {
+    var ua = '';
+    try { ua = String((root && root.navigator && root.navigator.userAgent) || ''); } catch (e) { ua = ''; }
+    return !/^Mozilla\//.test(ua) || /Windows/i.test(ua);
+  }
+
+  function helpFor(code) {
+    return !onWindows() && has(HELP_MAC, code) ? HELP_MAC[code] : HELP[code];
+  }
+
   function notReadyHelp(message) {
     var m = String(message || '');
     for (var i = 0; i < HELP_NOT_READY.length; i++) {
-      if (HELP_NOT_READY[i][0].test(m)) { return HELP_NOT_READY[i][1]; }
+      if (HELP_NOT_READY[i][0].test(m)) { return (!onWindows() && HELP_NOT_READY[i][2]) || HELP_NOT_READY[i][1]; }
     }
-    return HELP['not-ready'];
+    return helpFor('not-ready');
   }
 
   function has(obj, key) { return Object.prototype.hasOwnProperty.call(obj, key); }
 
   function helpText(code) {
-    if (has(HELP, code)) { return HELP[code]; }
-    return has(HELP_JOB, code) ? HELP_JOB[code] : HELP.failed;
+    if (has(HELP, code)) { return helpFor(code); }
+    return has(HELP_JOB, code) ? HELP_JOB[code] : helpFor('failed');
   }
 
   /* jobError: the helper's own error word for a failed job (optional). */
@@ -6906,6 +6937,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     if (typeof jobError === 'string' && jobError) { e.jobError = jobError; }
     if (e.code === 'not-ready') { e.help = notReadyHelp(message); }
     else if (e.code === 'failed' && e.jobError && has(HELP_JOB, e.jobError)) { e.help = HELP_JOB[e.jobError]; }
+    else if (e.code === 'failed' && e.jobError === 'failed') { e.help = onWindows() ? FAILED_NEXT : FAILED_NEXT_MAC; }     /* the helper's own message is the first half */
     else { e.help = helpText(e.code); }
     return e;
   }
@@ -7576,11 +7608,13 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
  * then setup-autostart-windows.bat for a computer without the icon, then start-helper-windows.bat for a person who would rather not
  * have the automatic start (that step begins "On Windows", so a Mac person does not read it as meant for them). The Mac steps are the same
  * as before. The panel never says that a page or a button starts the helper.
+ * 1.2.1 (round 3e) changes one condition and no member: a job that failed inside the helper with the plain word 'failed' (no cause of its own)
+ * now shows the helper's own message first and the client's next steps after it; before, the message was dropped for the generic advice.
  */
 var CleanupPanel = (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   var KEYS = {
     transcript: 'vrt:cleanup:transcript',
     settings: 'vrt:cleanup:settings',
@@ -11263,7 +11297,8 @@ var CleanupPanel = (function () {
       // then the general text for the error code, then the panel's own sentence
       // A job that failed inside the helper carries a complete, cause-specific sentence in err.help (it already starts with the
       // cause): show that alone instead of saying the same thing twice.
-      if (err && err.jobError && nonBlank(err.help)) { return clip(nonBlank(err.help).replace(/\s+/g, ' '), 400); }
+      // (the plain word 'failed' is not a cause: the helper's own message must still be shown, with the client's next steps after it)
+      if (err && err.jobError && err.jobError !== 'failed' && nonBlank(err.help)) { return clip(nonBlank(err.help).replace(/\s+/g, ' '), 400); }
       var T = tcApi(), next = err ? nonBlank(err.help) : '';
       if (!next) { try { if (T && typeof T.helpText === 'function') { next = String(T.helpText(code) || ''); } } catch (e) { next = ''; } }
       if (!next) { next = NEXT_STEP[code] || NEXT_STEP.failed; }
@@ -13345,7 +13380,7 @@ function makeHelperAutostart(Base, opts) {
   const HELP_WIN = {
     'no-helper': NO_HELPER,
     'busy': 'The helper is already making another transcript. Wait until it has finished (a transcript that a page you closed or reloaded started ends by itself after about 10 minutes), or to stop it right now, double-click ' + STOP_FILE + ' in the tools folder (or close the helper window, if you opened one yourself) and then ' + START_AGAIN + '. Then press Check again.',
-    'network': 'The connection to the helper was lost. Double-click the "Video Redline" icon on your Desktop to start the helper again (you can close the page it opens). Then click Create transcript again.',
+    'network': 'The connection to the helper was lost. Double-click the "Video Redline" icon on your Desktop to start the helper again (you can close the page it opens). Then click Create transcript and find cuts again.',
     'not-ready': 'Close other programs. Then stop the helper (double-click ' + STOP_FILE + ' in the tools folder, or close the helper window if you opened one yourself), ' + START_AGAIN + ' and press Check again. If this keeps happening, stop the helper the same way, double-click setup-windows.bat once more, wait for ALL DONE, and then ' + START_AGAIN + '.',
     'failed': 'Something went wrong while making the transcript. Try once more. If it keeps failing, try a shorter recording, or send the file logs\\helper.log from the tools folder (or the text in the helper window, if you opened one) to the person who invited you to the beta.'
   };

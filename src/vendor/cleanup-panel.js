@@ -244,11 +244,13 @@
  * then setup-autostart-windows.bat for a computer without the icon, then start-helper-windows.bat for a person who would rather not
  * have the automatic start (that step begins "On Windows", so a Mac person does not read it as meant for them). The Mac steps are the same
  * as before. The panel never says that a page or a button starts the helper.
+ * 1.2.1 (round 3e) changes one condition and no member: a job that failed inside the helper with the plain word 'failed' (no cause of its own)
+ * now shows the helper's own message first and the client's next steps after it; before, the message was dropped for the generic advice.
  */
 var CleanupPanel = (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   var KEYS = {
     transcript: 'vrt:cleanup:transcript',
     settings: 'vrt:cleanup:settings',
@@ -3931,7 +3933,8 @@ var CleanupPanel = (function () {
       // then the general text for the error code, then the panel's own sentence
       // A job that failed inside the helper carries a complete, cause-specific sentence in err.help (it already starts with the
       // cause): show that alone instead of saying the same thing twice.
-      if (err && err.jobError && nonBlank(err.help)) { return clip(nonBlank(err.help).replace(/\s+/g, ' '), 400); }
+      // (the plain word 'failed' is not a cause: the helper's own message must still be shown, with the client's next steps after it)
+      if (err && err.jobError && err.jobError !== 'failed' && nonBlank(err.help)) { return clip(nonBlank(err.help).replace(/\s+/g, ' '), 400); }
       var T = tcApi(), next = err ? nonBlank(err.help) : '';
       if (!next) { try { if (T && typeof T.helpText === 'function') { next = String(T.helpText(code) || ''); } } catch (e) { next = ''; } }
       if (!next) { next = NEXT_STEP[code] || NEXT_STEP.failed; }

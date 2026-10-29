@@ -1,6 +1,6 @@
 # Video Redline helper: what it allows and what it cannot do
 
-The helper is a small program that runs only on your own computer. The Video Redline page uses it to make a transcript. Nothing is sent over the internet.
+The helper is a small program that runs only on your own computer. The Video Redline page uses it to make a transcript. The helper sends nothing over the internet. (One package it uses, Microsoft's ONNX Runtime, has usage reporting built in; the helper asks it to stop as far as that can be asked. `README.md` says what that means on Windows and on a Mac.)
 
 **What it allows**
 - Only this computer can reach it. Other computers on your network cannot.

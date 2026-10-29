@@ -1,12 +1,12 @@
 @echo off
 rem ============================================================================================
-rem  Video Redline Tool - transcribe a video (Windows)
+rem  Video Redline - transcribe a video (Windows)
 rem  Drag a video onto this file, or double-click it and drop a video into the window.
 rem  Writes "<video name>-transcript.json" next to the video.
 rem ============================================================================================
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul 2>&1
-title Video Redline Tool - transcribing
+title Video Redline - transcribing
 
 rem Settings left on this PC by other software (another Python, CAD or GIS programs) would break our own private
 rem Python, so they are cleared for this window only.
@@ -22,6 +22,7 @@ set "PY=%TOOLS%\venv\Scripts\python.exe"
 set "HF_HOME=%TOOLS%\hf-cache"
 set "HF_HUB_OFFLINE=1"
 set "HF_HUB_DISABLE_TELEMETRY=1"
+set "ORT_DISABLE_TELEMETRY=1"
 set "HF_HUB_DISABLE_SYMLINKS_WARNING=1"
 set "PYTHONUTF8=1"
 
@@ -32,6 +33,14 @@ if /i "%FOLDERNAME:~-4%"==".zip" goto in_zip
 if /i "%FOLDERNAME:~0,4%"=="Temp" if /i "%FOLDERNAME:~5,1%"=="_" goto in_zip
 if /i "%FOLDERNAME:~0,3%"=="7zO" goto in_zip
 if /i "%FOLDERNAME:~0,6%"=="Rar$EX" goto in_zip
+rem (Explorer unpacks a single file together with its folder: <zip>\tools\<file>, so the folder above can be the zip)
+for %%I in ("%TOOLS%\..") do set "PARENTDIR=%%~fI"
+set "PARENTNAME=-"
+for %%I in ("%PARENTDIR%") do if not "%%~nxI"=="" set "PARENTNAME=%%~nxI"
+if /i "%PARENTNAME:~-4%"==".zip" goto in_zip
+if /i "%PARENTNAME:~0,4%"=="Temp" if /i "%PARENTNAME:~5,1%"=="_" goto in_zip
+if /i "%PARENTNAME:~0,3%"=="7zO" goto in_zip
+if /i "%PARENTNAME:~0,6%"=="Rar$EX" goto in_zip
 if not exist "%TOOLS%\transcribe.py" goto not_extracted
 
 if exist "%PY%" goto check_python
@@ -90,7 +99,8 @@ endlocal & exit /b %FAILED%
 echo.
 echo   PROBLEM: this file was opened from INSIDE the zip download. Windows unpacks only this one file
 echo            and leaves the rest of the tool behind in the zip.
-echo   WHAT TO DO: close this window, right-click the zip file you downloaded, choose "Extract All...", and use
+echo   WHAT TO DO: close this window, right-click the zip file you downloaded, choose "Extract All...", click Browse,
+echo   pick the folder VideoRedline inside your own user folder (make it first if it is not there), click Extract, and use
 echo   the files in the NEW folder. Run "setup-windows.bat" there first.
 goto end_fail
 

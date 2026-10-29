@@ -152,7 +152,7 @@ function makeHelperAutostart(Base, opts) {
   const HELP_WIN = {
     'no-helper': NO_HELPER,
     'busy': 'The helper is already making another transcript. Wait until it has finished (a transcript that a page you closed or reloaded started ends by itself after about 10 minutes), or to stop it right now, double-click ' + STOP_FILE + ' in the tools folder (or close the helper window, if you opened one yourself) and then ' + START_AGAIN + '. Then press Check again.',
-    'network': 'The connection to the helper was lost. Double-click the "Video Redline" icon on your Desktop to start the helper again (you can close the page it opens). Then click Create transcript again.',
+    'network': 'The connection to the helper was lost. Double-click the "Video Redline" icon on your Desktop to start the helper again (you can close the page it opens). Then click Create transcript and find cuts again.',
     'not-ready': 'Close other programs. Then stop the helper (double-click ' + STOP_FILE + ' in the tools folder, or close the helper window if you opened one yourself), ' + START_AGAIN + ' and press Check again. If this keeps happening, stop the helper the same way, double-click setup-windows.bat once more, wait for ALL DONE, and then ' + START_AGAIN + '.',
     'failed': 'Something went wrong while making the transcript. Try once more. If it keeps failing, try a shorter recording, or send the file logs\\helper.log from the tools folder (or the text in the helper window, if you opened one) to the person who invited you to the beta.'
   };
