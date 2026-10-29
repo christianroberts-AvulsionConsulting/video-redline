@@ -29,7 +29,6 @@
     <button class="btn icon ghost" id="btnPanelR" data-icon="panel-right" title="Show or hide the properties panel"></button>
     <input type="file" id="fileVideo" accept="video/*,.mp4,.mov,.m4v,.webm" hidden>
     <input type="file" id="fileSession" accept=".json,application/json" hidden>
-    <input type="file" id="fileCam" accept=".xml,text/xml,application/xml" hidden>
     <input type="file" id="fileStyle" accept=".md,.css,.json,text/markdown,text/css,application/json" multiple hidden>
     <input type="file" id="fileLib" accept=".json,application/json" hidden>
   </header>
@@ -70,6 +69,12 @@
         <p class="dim" id="lastSeen"></p>
       </div>
       <button class="chip-toggle" id="btnPreview" data-icon="eye" title="Show the styled visuals on the video" hidden><span class="lbl">Preview visuals</span></button>
+      <div class="vzoom" id="vzoom" role="group" aria-label="Zoom the picture" hidden>
+        <button class="btn icon sm ghost" id="vzOut" data-icon="zoom-out" title="Zoom out on the picture" aria-label="Zoom out on the picture"></button>
+        <span class="vz-val" id="vzVal">1×</span>
+        <button class="btn icon sm ghost" id="vzIn" data-icon="zoom-in" title="Zoom in on the picture. You can also scroll the mouse wheel over it." aria-label="Zoom in on the picture"></button>
+        <button class="btn sm ghost" id="vzFit" data-icon="fit" title="Show the whole picture again" disabled><span class="lbl">Fit</span></button>
+      </div>
     </div>
     <div class="transport" id="transport">
       <div class="tc" id="clock"><span class="tc-main">0:00.00</span><span class="tc-sub">/ 0:00.00 · frame 0</span></div>

@@ -9,13 +9,13 @@ const TYPES = [
   ['visual', 'image', 'Add a picture, screenshot or clip over the video'],
   ['list', 'list', 'Show a list on screen'],
   ['diagram', 'diagram', 'Show a diagram on screen'],
-  ['callout', 'callout', 'Point out or highlight something'],
-  ['lower-third', 'lower-third', 'A name or title bar near the bottom'],
   ['note', 'note', 'A comment only, no edit']
 ];
 const TYPE_NAMES = TYPES.map(t => t[0]);
-const VISUAL_TYPES = ['visual', 'list', 'diagram', 'callout', 'lower-third'];   // types that can carry a styled visual
-const COLORS = { cut: '#ef5350', visual: '#a78bfa', list: '#34d399', diagram: '#38bdf8', callout: '#fbbf24', 'lower-third': '#2dd4bf', note: '#94a3b8' };
+const VISUAL_TYPES = ['visual', 'list', 'diagram'];   // types that can carry a styled visual
+// Types that used to exist. Old saved markers that have one become a "visual" marker (they keep their callout / lower-third look as the visual's kind).
+const RETIRED_TYPES = ['callout', 'lower-third'];
+const COLORS = { cut: '#ef5350', visual: '#a78bfa', list: '#34d399', diagram: '#38bdf8', note: '#94a3b8' };
 const CUSTOM_COLOR = '#e879f9';
 const colorOf = t => COLORS[t] || CUSTOM_COLOR;
 const typeLabel = m => m.type || 'custom';

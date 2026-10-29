@@ -61,6 +61,40 @@ async function sessPut(dir, name, text) {
   await w.write(text); await w.close();
 }
 function sessForget() { SESS.current = null; SESS.curVideo = ''; }
+
+/* ---------- remembering the videos (a session only holds the video's name, so the page keeps a handle to each video it opened) ---------- */
+const VID_TYPES = [{ description: 'Video files', accept: { 'video/*': ['.mp4', '.mov', '.m4v', '.webm'] } }];
+const vidKey = name => 'video:' + name;
+function vidRemember(name, handle) { if (handle && handle.kind === 'file') idbSet(vidKey(name), handle); }
+// The File the page was allowed to keep for this video name, or null: never opened with the picker, moved or deleted, or the browser's OK was refused.
+async function vidRecall(name) {
+  const handle = await idbGet(vidKey(name));
+  if (!handle || typeof handle.queryPermission !== 'function') return null;
+  try {
+    let p = await handle.queryPermission({ mode: 'read' });
+    if (p !== 'granted') p = await handle.requestPermission({ mode: 'read' });          // (needs the click that opened the session: it is still fresh)
+    return p === 'granted' ? { file: await handle.getFile(), handle } : null;
+  } catch (e) { return null; }
+}
+// The browser's own file picker; unlike the hidden file input it hands back a handle the page can keep. Throws AbortError when cancelled.
+async function vidPick() {
+  const [handle] = await window.showOpenFilePicker({ id: 'vrt-video', startIn: 'videos', types: VID_TYPES });
+  return { file: await handle.getFile(), handle };
+}
+// Open video…: the picker above where the browser has it, otherwise the plain file input.
+async function openVideoPicker() {
+  if (typeof window.showOpenFilePicker !== 'function') { $('fileVideo').click(); return; }
+  try { const p = await vidPick(); loadVideo(p.file, p.handle); }
+  catch (e) { if (!e || e.name !== 'AbortError') toast('The browser would not open its file picker. Drop the video onto the page instead.', 6000); }
+}
+// Resolves true when the video just given to loadVideo is ready (false when the browser could not play it)
+function videoReady() {
+  return new Promise(res => {
+    const done = ok => { video.removeEventListener('loadedmetadata', yes); video.removeEventListener('error', no); res(ok && !!meta); };
+    const yes = () => done(true), no = () => done(false);
+    video.addEventListener('loadedmetadata', yes); video.addEventListener('error', no);       // (added after the page's own listeners, so `meta` is set by then)
+  });
+}
 const sessFail = e => e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
   ? 'The browser no longer allows this folder. Open File and allow it again.'
   : e && e.name === 'NotFoundError' ? 'That session or folder cannot be found any more.' : 'That did not work (' + ((e && e.message) || 'unknown problem') + ').';
@@ -141,7 +175,27 @@ function sessWhen(ms) {
   return sameDay ? 'today ' + time : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' }) + ' ' + time;
 }
 
+// Clicking a session opens the video it was made for as well, so the person does not have to find it first: the page's remembered copy of it,
+// otherwise the file picker (asked for in the toast). Returns false when there is still no video to put the markers on.
+async function sessOpenVideo(s) {
+  if (!s.video || (meta && meta.name === s.video)) return true;               // the right video is open already (or the session names none)
+  let got = await vidRecall(s.video);
+  if (!got) {
+    if (typeof window.showOpenFilePicker !== 'function') return true;         // this browser has no picker like that: the old way ("Open a video first", or “Load it anyway?” for another video)
+    toast('Pick the video “' + s.video + '” to open this session.', 6000);
+    try { got = await vidPick(); }
+    catch (e) {
+      if (e && e.name !== 'AbortError') toast('The browser would not open its file picker. Open the video with Open video…, then pick the session again.', 6000);
+      else if (!meta) toast('Not opened: this session needs its video “' + s.video + '”.', 5000);
+      return !!meta;                                                          // (cancelled with another video open: the question “Load it anyway?” follows)
+    }
+  }
+  const ready = videoReady();
+  loadVideo(got.file, got.handle);
+  return await ready;
+}
 async function sessOpen(s) {
+  if (!(await sessOpenVideo(s))) return;
   if (needVideo()) return;
   let text;
   try { text = await (await (await SESS.dir.getFileHandle(s.fname)).getFile()).text(); } catch (e) { toast('Could not read “' + s.name + '”. ' + sessFail(e), 5000); return; }
@@ -221,7 +275,6 @@ async function sessRender(box) {               // fills the "Saved sessions" par
         icon('folder-open'), SESS.dir.name || 'folder')));
       if (!rows.length) kids.push(note('No saved sessions yet. Use Save session below and it shows up here.'));
       else {
-        if (!meta) kids.push(note('Open a video first, then pick a session to load its markers.'));
         kids.push(h('div', { class: 'sess-list' }, rows.map(s => sessRow(s, box))));
       }
     }
@@ -274,11 +327,10 @@ async function openFileMenu() {
   const item = (ic, label, fn) => h('button', { role: 'menuitem', onclick: () => { closePopover(); fn(); } }, icon(ic), label);
   const box = h('div', { class: 'sess-box' });
   const menu = h('div', { class: 'menu sess-menu', role: 'menu' },
-    item('folder-open', 'Open video…', () => $('fileVideo').click()), h('hr'),
+    item('folder-open', 'Open video…', openVideoPicker), h('hr'),
     box, h('hr'),
     item('save', 'Save session', saveSession), h('hr'),
-    item('download', 'Download session file (JSON)', saveSessionFile), item('upload', 'Load session from file…', () => $('fileSession').click()),
-    item('import', 'Import Camtasia markers…', () => $('fileCam').click()));
+    item('download', 'Download session file (JSON)', saveSessionFile), item('upload', 'Load session from file…', () => $('fileSession').click()));
   await sessRender(box);
   if (token === openFileMenu.n) openPopover($('btnFile'), menu);          // (a later click on File wins)
 }

@@ -188,11 +188,6 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 .empty-props { padding: 40px 28px; }
 
 /* ---------- visual designer pieces used in the properties panel and the library ---------- */
-.kindgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
-.kbtn { display: grid; justify-items: center; gap: 3px; padding: 7px 1px 5px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text-2); font-size: 10.5px; line-height: 1.15; text-align: center; }
-.kbtn .ic { width: 18px; height: 18px; }
-.kbtn:hover { background: var(--panel-3); color: var(--text); }
-.kbtn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .stylebtn { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--line-2); background: var(--input); text-align: left; }
 .stylebtn:hover { border-color: #4a505c; }
 .stylebtn .nm { flex: 1; min-width: 0; }
@@ -237,6 +232,12 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 .overlay { position: absolute; left: 0; top: 0; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
 .overlay.canDraw { cursor: crosshair; }
 .stageWrap .chip-toggle { position: absolute; right: 14px; top: 12px; z-index: 6; }
+.vzoom { position: absolute; right: 14px; bottom: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 20px;
+  background: rgba(20, 22, 26, .82); border: 1px solid var(--line-2); backdrop-filter: blur(6px); }
+.vzoom .btn.icon { width: 28px; }
+.vz-val { min-width: 36px; text-align: center; font: 12px var(--mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.stage.zoomed .overlay:not(.canDraw) { cursor: grab; }
+.stage.panning .overlay, .stage.panning .overlay * { cursor: grabbing !important; }
 .drop { position: absolute; left: 18px; top: 18px; right: 18px; bottom: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   text-align: center; padding: 24px; border: 2px dashed var(--line-2); border-radius: 16px; color: var(--text-2); z-index: 5; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
@@ -769,7 +770,6 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
     <button class="btn icon ghost" id="btnPanelR" data-icon="panel-right" title="Show or hide the properties panel"></button>
     <input type="file" id="fileVideo" accept="video/*,.mp4,.mov,.m4v,.webm" hidden>
     <input type="file" id="fileSession" accept=".json,application/json" hidden>
-    <input type="file" id="fileCam" accept=".xml,text/xml,application/xml" hidden>
     <input type="file" id="fileStyle" accept=".md,.css,.json,text/markdown,text/css,application/json" multiple hidden>
     <input type="file" id="fileLib" accept=".json,application/json" hidden>
   </header>
@@ -810,6 +810,12 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
         <p class="dim" id="lastSeen"></p>
       </div>
       <button class="chip-toggle" id="btnPreview" data-icon="eye" title="Show the styled visuals on the video" hidden><span class="lbl">Preview visuals</span></button>
+      <div class="vzoom" id="vzoom" role="group" aria-label="Zoom the picture" hidden>
+        <button class="btn icon sm ghost" id="vzOut" data-icon="zoom-out" title="Zoom out on the picture" aria-label="Zoom out on the picture"></button>
+        <span class="vz-val" id="vzVal">1×</span>
+        <button class="btn icon sm ghost" id="vzIn" data-icon="zoom-in" title="Zoom in on the picture. You can also scroll the mouse wheel over it." aria-label="Zoom in on the picture"></button>
+        <button class="btn sm ghost" id="vzFit" data-icon="fit" title="Show the whole picture again" disabled><span class="lbl">Fit</span></button>
+      </div>
     </div>
     <div class="transport" id="transport">
       <div class="tc" id="clock"><span class="tc-main">0:00.00</span><span class="tc-sub">/ 0:00.00 · frame 0</span></div>
@@ -11562,13 +11568,13 @@ const TYPES = [
   ['visual', 'image', 'Add a picture, screenshot or clip over the video'],
   ['list', 'list', 'Show a list on screen'],
   ['diagram', 'diagram', 'Show a diagram on screen'],
-  ['callout', 'callout', 'Point out or highlight something'],
-  ['lower-third', 'lower-third', 'A name or title bar near the bottom'],
   ['note', 'note', 'A comment only, no edit']
 ];
 const TYPE_NAMES = TYPES.map(t => t[0]);
-const VISUAL_TYPES = ['visual', 'list', 'diagram', 'callout', 'lower-third'];   // types that can carry a styled visual
-const COLORS = { cut: '#ef5350', visual: '#a78bfa', list: '#34d399', diagram: '#38bdf8', callout: '#fbbf24', 'lower-third': '#2dd4bf', note: '#94a3b8' };
+const VISUAL_TYPES = ['visual', 'list', 'diagram'];   // types that can carry a styled visual
+// Types that used to exist. Old saved markers that have one become a "visual" marker (they keep their callout / lower-third look as the visual's kind).
+const RETIRED_TYPES = ['callout', 'lower-third'];
+const COLORS = { cut: '#ef5350', visual: '#a78bfa', list: '#34d399', diagram: '#38bdf8', note: '#94a3b8' };
 const CUSTOM_COLOR = '#e879f9';
 const colorOf = t => COLORS[t] || CUSTOM_COLOR;
 const typeLabel = m => m.type || 'custom';
@@ -11769,7 +11775,10 @@ function openModal(o) {
    02 - Video: opening, playback, seeking (everything snaps to whole frames)
    ===================================================================== */
 let videoFile = null;                           // the File that is open now (the cleanup helper reads it)
-function loadVideo(file) {
+// `handle` (optional) is the file's FileSystemFileHandle when the picker or a drop gave one: it is kept so a saved session can open this video again by itself.
+function loadVideo(file, handle) {
+  saveNow();                                    // the markers of the video that is open now are kept before another video takes their place
+  if (handle) vidRemember(file.name, handle);
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(file);        // the file is streamed by the browser, never read into memory by us
   pendingName = file.name; videoFile = file;
@@ -11779,7 +11788,7 @@ function loadVideo(file) {
 function closeVideo() {
   meta = null; videoFile = null; markers = []; selId = selBox = inF = outF = null;
   hist = []; hi = -1; syncUndo();
-  stage.hidden = true; dropEl.hidden = false; $('btnPreview').hidden = true;
+  stage.hidden = true; dropEl.hidden = false; $('btnPreview').hidden = true; $('vzoom').hidden = true; resetVideoZoom();
   $('fileinfo').innerHTML = '<span class="dim">No video open yet</span>';
   overlay.textContent = ''; overlayKey = '';
   changed(); renderRuler();
@@ -11806,8 +11815,9 @@ video.addEventListener('loadedmetadata', () => {
   }
   selId = selBox = inF = outF = null;
   video.playbackRate = parseFloat($('speed').value);
-  dropEl.hidden = true; stage.hidden = false; $('btnPreview').hidden = false;
+  dropEl.hidden = true; stage.hidden = false; $('btnPreview').hidden = false; $('vzoom').hidden = false;
   resetHistory();
+  resetVideoZoom();                                // a new video always opens showing the whole picture
   renderMeta(); fitStage(); zoomFit(); changed(); updateClock(true);
   stopRange(); buildCleanupPanel();
   toast(restored ? 'Welcome back: ' + restored + ' marker' + (restored === 1 ? '' : 's') + ' restored.' : 'Video ready. Press M to add a marker.');
@@ -11888,10 +11898,87 @@ function fitStage() {
   if (!meta) return;
   const w = stageWrap.clientWidth - 36, hgt = stageWrap.clientHeight - 36;
   if (w < 60 || hgt < 60) return;
-  const s = Math.min(w / meta.w, hgt / meta.h);
+  const s = Math.min(w / meta.w, hgt / meta.h) * vz;
   stage.style.width = Math.floor(meta.w * s) + 'px';
   stage.style.height = Math.floor(meta.h * s) + 'px';
+  clampPan();
 }
+
+/* ---------- zoom in on the picture (the timeline has its own zoom, see 03-timeline.js) ----------
+   The picture is simply made bigger than the middle area, which hides what does not fit. Boxes are stored in video pixels and
+   vpt() measures the overlay on screen, so drawing and moving boxes keeps working at any zoom. */
+const VZ_MAX = 8;
+let vz = 1;                       // how many times bigger than "fit"
+let vpan = { x: 0, y: 0 };        // how far the picture is moved from the middle, in screen pixels
+function clampPan() {
+  // The picture can be moved until its edge, plus the 18 px margin, meets the edge of the area. When it fits there is nothing to move.
+  const mx = Math.max(0, (stage.offsetWidth - stageWrap.clientWidth) / 2 + 18), my = Math.max(0, (stage.offsetHeight - stageWrap.clientHeight) / 2 + 18);
+  vpan.x = clamp(vpan.x, -mx, mx); vpan.y = clamp(vpan.y, -my, my);
+  stage.style.transform = vpan.x || vpan.y ? 'translate(' + vpan.x + 'px,' + vpan.y + 'px)' : '';
+}
+function syncVideoZoom() {
+  $('vzVal').textContent = (vz < 10 ? vz.toFixed(1).replace('.0', '') : Math.round(vz)) + '×';
+  $('vzFit').disabled = vz <= 1;
+  $('vzOut').disabled = vz <= 1;
+  $('vzIn').disabled = vz >= VZ_MAX;
+  stage.classList.toggle('zoomed', vz > 1);
+}
+// Zoom while the point under screen (cx, cy) stays where it is (default: the middle of the area).
+function setVideoZoom(z, cx, cy) {
+  if (!meta) return;
+  z = clamp(z, 1, VZ_MAX);
+  if (z === vz) return;
+  const wr = stageWrap.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+  if (cx == null) { cx = wr.left + wr.width / 2; cy = wr.top + wr.height / 2; }
+  const u = (cx - sr.left) / sr.width, v = (cy - sr.top) / sr.height, k = z / vz;     // the point as a fraction of the picture, and how much bigger the picture gets
+  const W = sr.width * k, H = sr.height * k;
+  vpan.x = cx - u * W - (wr.left + wr.width / 2 - W / 2);
+  vpan.y = cy - v * H - (wr.top + wr.height / 2 - H / 2);
+  vz = z;
+  fitStage(); syncVideoZoom();
+}
+function resetVideoZoom() {
+  vz = 1; vpan = { x: 0, y: 0 }; vpd = null;
+  stage.style.transform = ''; stage.classList.remove('panning');
+  syncVideoZoom();
+}
+stageWrap.addEventListener('wheel', e => {
+  if (!meta || stage.hidden) return;
+  e.preventDefault();                                            // nothing else here scrolls, so the wheel zooms (a pinch on a touchpad arrives as Ctrl + wheel)
+  const dy = clamp(e.deltaMode === 1 ? e.deltaY * 20 : e.deltaY, -60, 60);
+  setVideoZoom(vz * Math.exp(-dy * (e.ctrlKey ? 0.015 : 0.0045)), e.clientX, e.clientY);
+}, { passive: false });
+$('vzIn').addEventListener('click', () => setVideoZoom(vz * 2));
+$('vzOut').addEventListener('click', () => setVideoZoom(vz / 2));
+$('vzFit').addEventListener('click', () => setVideoZoom(1));
+
+// Moving the zoomed picture: the middle mouse button, Shift + drag, or a plain drag when no marker is picked (nothing could be drawn then anyway).
+let vpd = null;
+function startPan(e) {
+  if (vz <= 1) return false;
+  const plain = e.button === 0 && !e.shiftKey && !overlay.classList.contains('canDraw') && !e.target.closest('.box');
+  if (!(plain || e.button === 1 || (e.button === 0 && e.shiftKey))) return false;
+  e.preventDefault();
+  try { overlay.setPointerCapture(e.pointerId); } catch (x) { /* synthetic events */ }
+  vpd = { id: e.pointerId, x: e.clientX, y: e.clientY, px: vpan.x, py: vpan.y, moved: false, plain };
+  stage.classList.add('panning');
+  return true;
+}
+overlay.addEventListener('pointermove', e => {
+  if (!vpd || e.pointerId !== vpd.id) return;
+  const dx = e.clientX - vpd.x, dy = e.clientY - vpd.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) vpd.moved = true;
+  vpan.x = vpd.px + dx; vpan.y = vpd.py + dy;
+  clampPan();
+});
+function endPan(e) {
+  if (!vpd || e.pointerId !== vpd.id) return;
+  const d = vpd; vpd = null;
+  stage.classList.remove('panning');
+  if (!d.moved && d.plain && e.type === 'pointerup') toast('Pick a marker first (press M to add one), then drag on the video to draw a box.', 4200);
+}
+overlay.addEventListener('pointerup', endPan);
+overlay.addEventListener('pointercancel', endPan);
 
 /* ---- src/js/03-timeline.js ---- */
 /* =====================================================================
@@ -12041,7 +12128,7 @@ function renderTimeline() {
     heads.appendChild(h('div', { class: 'head', style: '--tc:' + colorOf('note') + ';top:0;height:64px' }, icon('layers'), 'Markers'));
     lanes.appendChild(h('div', { class: 'none', text: 'No markers yet. Press M, or drag on this track to mark a stretch.' }));
     lanes.appendChild(h('div', { class: 'trk', 'data-type': 'note', style: 'top:0;height:64px' }));
-    heads.style.height = lanes.style.height = '64px';
+    heads.style.minHeight = lanes.style.height = '64px';       // min-height, so the name column still stretches to the bottom and hides the playhead behind it
     return;
   }
   keys.forEach((k, ti) => {
@@ -12064,7 +12151,7 @@ function renderTimeline() {
     });
     y += th;
   });
-  heads.style.height = lanes.style.height = y + 'px';
+  heads.style.minHeight = lanes.style.height = y + 'px';
 }
 
 /* ---------- mouse on the timeline ----------
@@ -12086,6 +12173,7 @@ strip.addEventListener('pointerdown', e => {
   if (e.target.closest('#ruler')) { drag = { kind: 'scrub', x0: e.clientX, moved: false }; video.pause(); seekFrame(Math.floor(ff)); return; }
   if (clipEl) {
     const m = byId(clipEl.dataset.id), side = e.target.dataset.side;
+    selBox = null;                                                    // clicking the marker itself means Delete now removes the marker, not a box picked earlier
     selectMarker(m.id, { seek: false });
     drag = { kind: side === 'l' ? 'l' : side === 'r' ? 'r' : 'move', id: m.id, x0: e.clientX, ff0: ff, sF: F(m.start), eF: F(m.end), moved: false };
     return;
@@ -12137,6 +12225,20 @@ function endDrag() {
 }
 strip.addEventListener('pointerup', endDrag);
 strip.addEventListener('pointercancel', endDrag);
+
+// Right-click a marker: select it and offer Delete (Undo brings it back)
+strip.addEventListener('contextmenu', e => {
+  const clipEl = meta && e.target.closest && e.target.closest('.clip');
+  if (!clipEl) return;                                                // anywhere else the browser's own menu stays
+  e.preventDefault();
+  const m = byId(clipEl.dataset.id); if (!m) return;
+  selBox = null; selectMarker(m.id, { seek: false });
+  const x = e.clientX, y = e.clientY;
+  const menu = h('div', { class: 'menu', role: 'menu', style: 'min-width:170px' },
+    h('button', { role: 'menuitem', onclick: () => { closePopover(); deleteMarker(m.id); } }, icon('trash'), 'Delete marker'));
+  openPopover({ getBoundingClientRect: () => ({ left: x, right: x, top: y - 6, bottom: y - 6 }), contains: () => false }, menu);       // a point, not an element, to hang the menu on
+  const b = menu.querySelector('button'); if (b) b.focus();
+});
 
 /* ---------- the bar between the video and the timeline: drag to resize ---------- */
 // How tall the timeline may be: at most 62% of the window and at most what the page grid leaves room for (styles.css: 100vh - 340px, never under 150px).
@@ -12446,7 +12548,9 @@ function rectFrom(ax, ay, bx, by) {
 }
 let bdrag = null;
 overlay.addEventListener('pointerdown', e => {
-  if (!meta || e.button !== 0) return;
+  if (!meta) return;
+  if (startPan(e)) return;                         // a zoomed picture is being moved, not drawn on (see 02-video.js)
+  if (e.button !== 0) return;
   flushEdits();
   const p = vpt(e), boxEl = e.target.closest('.box');
   if (boxEl) {
@@ -12515,7 +12619,7 @@ function syncPreviewBtn() {
 /* =====================================================================
    06 - Visuals and styles
    A "visual" is a kind (list, diagram, callout...) + a style (an Open Design design system) + its text.
-   Markers of type visual / list / diagram / callout / lower-third carry one. Saved visuals live in the
+   Markers of type visual / list / diagram carry one. Saved visuals live in the
    Visuals tab; styles live in the Styles tab (150 built in, more can be imported from Open Design).
    ===================================================================== */
 const ODSTYLES = (() => { const el = $('od-styles'); if (!el) return []; try { return JSON.parse(el.textContent); } catch (e) { return []; } })();
@@ -12551,11 +12655,15 @@ function defaultVisual(type) {
   v.style = defaultStyleId(); v.textBy = 'ai';
   return v;
 }
+// A visual can carry a note for the AI editor (movement, a 3D look, anything the picture cannot show). Using the visual from the library puts it into the marker's Comment.
+const NOTE_MAX = 600;
 function normVisual(v) {
   if (!HAS_VIS || !v || typeof v !== 'object') return null;
   const n = VIS.normalize(v);
   n.style = (typeof v.style === 'string' && v.style) ? v.style : defaultStyleId();
   n.textBy = (v.textBy === 'ai' || v.textBy === 'me') ? v.textBy : (hasText(n) ? 'me' : 'ai');      // older files with typed words keep them
+  const note = typeof v.note === 'string' ? v.note.replace(/\r\n?/g, '\n').trim().slice(0, NOTE_MAX) : '';
+  if (note) n.note = note;
   return n;
 }
 // Library items saved before textBy existed (and the starter set of an older build) get theirs once, here, so the editor, the preview and the export agree.
@@ -12658,6 +12766,22 @@ function openStylePicker(anchor, currentId, onPick) {
   setTimeout(() => search.focus(), 0);
   const cur = list.querySelector('.picker-item.on'); if (cur) revealIn(list, cur);
 }
+/* ---------- kind picker (shows only the current kind; the others open in a popover) ---------- */
+function openKindPicker(anchor, currentId, onPick) {
+  const list = h('div', { class: 'picker-list' });
+  const box = h('div', { class: 'picker' }, list);
+  VIS.KINDS.forEach(k => list.appendChild(h('button', { class: 'picker-item' + (k.id === currentId ? ' on' : ''), type: 'button', onclick: () => { closePopover(); onPick(k.id); } },
+    icon(KIND_ICON[k.id] || 'sparkles'), h('span', { class: 'nm' }, h('b', { text: k.label }), h('small', { text: k.blurb })))));
+  openPopover(anchor, box);
+  const cur = list.querySelector('.picker-item.on'); if (cur) revealIn(list, cur);
+}
+function kindButton(v, onChange) {
+  const kd = kindById(v.kind);
+  const b = h('button', { class: 'stylebtn', type: 'button', title: 'Choose a kind of visual' }, icon(KIND_ICON[v.kind] || 'sparkles'),
+    h('span', { class: 'nm' }, h('b', { text: kd ? kd.label : v.kind })), icon('chevron-down'));
+  b.addEventListener('click', () => openKindPicker(b, v.kind, id => { v.kind = id; onChange(v, { final: true, structural: true }); }));
+  return b;
+}
 function styleButton(v, onChange) {
   const st = styleById(v.style) || fallbackStyle();
   const b = h('button', { class: 'stylebtn', type: 'button', title: 'Choose a style' }, swatchEl(st),
@@ -12678,10 +12802,8 @@ function buildVisualEditor(v, onChange, o) {
   function draw() {
     root.textContent = '';
     const kd = kindById(v.kind), ai = isAiText(v);
-    const kinds = h('div', { class: 'kindgrid' }, VIS.KINDS.map(k => h('button', { class: 'kbtn' + (v.kind === k.id ? ' on' : ''), type: 'button', title: k.blurb,
-      onclick: () => { v.kind = k.id; fire({ final: true, structural: true }); } }, icon(KIND_ICON[k.id] || 'sparkles'), k.label)));
-    // a div, not a label: a label would pass a click on its caption or the gaps between the buttons to the first kind button
-    root.appendChild(h('div', { class: 'field', role: 'group', 'aria-label': 'What kind of visual?' }, h('span', { text: 'What kind of visual?' }), kinds, kd ? h('span', { class: 'hint', text: kd.blurb }) : null));
+    // a div, not a label: a label would pass a click on its caption to the button
+    root.appendChild(h('div', { class: 'field', role: 'group', 'aria-label': 'What kind of visual?' }, h('span', { text: 'What kind of visual?' }), kindButton(v, onChange), kd ? h('span', { class: 'hint', text: kd.blurb }) : null));
     root.appendChild(h('label', { class: 'field', style: 'margin-top:12px' }, 'Style (optional)', styleButton(v, onChange)));
 
     // who writes the words (two toggle buttons: Space and the arrow keys drive the video everywhere in this app, so these are not real radios)
@@ -12789,10 +12911,19 @@ function suggestName(v) {
 function applyLibraryVisual(item, m) {
   m = m || byId(selId);
   if (!m) { toast('Select a marker first, then use a visual.'); return; }
-  if (!isVisualType(m.type)) { const k = kindById(item.visual.kind); m.type = (k && k.suits && k.suits[0]) || 'visual'; }
+  if (!isVisualType(m.type)) { const k = kindById(item.visual.kind); m.type = (k && k.suits && k.suits.find(isVisualType)) || 'visual'; }
+  const oldNote = m.visual && m.visual.note;
   m.visual = freshVisual(item.visual);
+  swapNote(m, oldNote, m.visual.note);
   commit(); changed();
-  toast('Applied “' + item.name + '” to marker #' + (sorted().indexOf(m) + 1) + '.');
+  toast('Applied “' + item.name + '” to marker #' + (sorted().indexOf(m) + 1) + '.' + (m.visual.note ? ' Its note was added to the Comment.' : ''));
+}
+// Puts a visual's note into the marker's Comment (once). The note of the visual it replaces comes out again, but only while it is still there word for word.
+function swapNote(m, oldNote, newNote) {
+  let c = m.comment || '';
+  if (oldNote && oldNote !== newNote && c.indexOf(oldNote) >= 0) c = c.replace(oldNote, '').replace(/\n{3,}/g, '\n\n').trim();
+  if (newNote && c.indexOf(newNote) < 0) c = c.trim() ? c.replace(/\s+$/, '') + '\n' + newNote : newNote;
+  m.comment = c;
 }
 function openLibraryPicker(anchor, m) {
   const box = h('div', { class: 'picker' }, h('div', { class: 'picker-top' }, h('b', { text: 'Your saved visuals' })), h('div', { class: 'picker-list' }));
@@ -12809,14 +12940,20 @@ function openDesigner(o) {
   const nameInp = o.withName ? h('input', { type: 'text', value: o.name || '', placeholder: 'Name, e.g. Shortcut keys, warm', 'aria-label': 'Name' }) : null;
   const thumb = stageThumb(() => v, () => o.box || null);
   const editor = buildVisualEditor(v, (vv, info) => { thumb.update(); if (info.structural) editor.redraw(); }, { open: true });
-  const side = h('div', { class: 'designer-side' }, nameInp ? h('label', { class: 'field' }, 'Name', nameInp) : null, editor);
+  // the note is for the library only: a visual already on a marker has had its note put into the Comment, which is where it is edited from then on
+  const noteInp = o.withName ? h('textarea', { rows: 3, maxlength: NOTE_MAX, 'aria-label': 'Note for the AI', placeholder: 'For example: Turn the number slowly around its vertical axis in 3D, like a rotating sign.' }) : null;
+  if (noteInp) { noteInp.value = v.note || ''; noteInp.addEventListener('input', () => { v.note = noteInp.value; }); }
+  const noteField = noteInp ? h('label', { class: 'field', style: 'margin-top:12px' }, 'Note for the AI (optional)', noteInp,
+    h('span', { class: 'hint', text: 'Added to the marker’s Comment each time you press Use, so you do not have to write it again. Good for things the picture cannot show, such as a 3D spin or a slow fade.' })) : null;
+  const done = () => normVisual(v) || v;
+  const side = h('div', { class: 'designer-side' }, nameInp ? h('label', { class: 'field' }, 'Name', nameInp) : null, editor, noteField);
   const left = h('div', {}, thumb.el, h('div', { class: 'hint', style: 'margin-top:10px', text: frameBackdrop() ? 'Shown on top of the frame the video is paused on.' : 'Open a video to see the visual on top of a real frame.' }));
   const modal = openModal({
     title: o.title || 'Visual designer',
     body: h('div', { class: 'designer' }, left, side),
     footer: [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
-      o.secondaryLabel ? h('button', { class: 'btn', onclick: () => { o.onSecondary(v, nameInp ? nameInp.value : ''); closeModal(); } }, o.secondaryLabel) : null,
-      h('button', { class: 'btn primary', onclick: () => { o.onApply(v, nameInp ? nameInp.value : ''); closeModal(); } }, o.applyLabel || 'Save')]
+      o.secondaryLabel ? h('button', { class: 'btn', onclick: () => { o.onSecondary(done(), nameInp ? nameInp.value : ''); closeModal(); } }, o.secondaryLabel) : null,
+      h('button', { class: 'btn primary', onclick: () => { o.onApply(done(), nameInp ? nameInp.value : ''); closeModal(); } }, o.applyLabel || 'Save')]
   });
   mountIcons(modal.box);
   flushInsert();
@@ -12841,14 +12978,14 @@ function seedLibrary() {
 function visualRow(it) {
   const thumb = stageThumb(() => it.visual, null, { backdrop: false });
   const st = styleById(it.visual.style);
-  const sub = (isAiText(it.visual) ? 'AI text · ' : '') + kindLabel(it.visual.kind) + (st ? ' · ' + st.name : '');      // the AI flag comes first: it is the part that must not be cut off
+  const sub = (isAiText(it.visual) ? 'AI text · ' : '') + (it.visual.note ? 'Note · ' : '') + kindLabel(it.visual.kind) + (st ? ' · ' + st.name : '');      // the AI flag comes first: it is the part that must not be cut off
   return h('div', { class: 'vrow', 'data-id': it.id },
     thumb.el,
     h('div', { class: 'info' },
       h('b', { text: it.name, title: it.name }),
       h('small', { text: sub, title: sub + (isAiText(it.visual) ? ' (the assistant writes the words from the marker comment)' : '') }),
       h('div', { class: 'acts' },
-        h('button', { class: 'btn sm primary', title: 'Use on the selected marker', onclick: () => applyLibraryVisual(it) }, 'Use'),
+        h('button', { class: 'btn sm primary', title: 'Use on the selected marker' + (it.visual.note ? ' (its note is added to the Comment: ' + it.visual.note + ')' : ''), onclick: () => applyLibraryVisual(it) }, 'Use'),
         h('button', { class: 'btn icon sm', title: 'Edit this visual', 'aria-label': 'Edit', onclick: () => editLibraryVisual(it) }, icon('settings')),
         h('button', { class: 'btn icon sm', title: 'Make a copy', 'aria-label': 'Duplicate', onclick: () => duplicateLibraryVisual(it) }, icon('duplicate')),
         h('button', { class: 'btn icon sm danger', title: 'Delete from the library', 'aria-label': 'Delete', onclick: () => deleteLibraryVisual(it) }, icon('trash')))));
@@ -12871,6 +13008,8 @@ function newLibraryVisual() {
   openDesigner({ title: 'New visual', visual: base, name: '', withName: true, applyLabel: 'Save to library',
     onApply: (nv, name) => { lib.visuals.unshift({ id: uid(), name: (name || '').trim() || suggestName(nv), visual: nv, created: Date.now() }); saveLib(); renderVisualsPane(); } });
 }
+// The Make with AI button, shared by the Visuals and Styles tabs (both open the same window; its result always goes to the Visuals tab)
+const makeWithAiRow = () => HAS_VIS ? h('div', { class: 'row' }, h('button', { class: 'btn sm', style: 'flex:1 1 auto', title: 'Copy a prompt that lets any AI assistant write visuals for your library', onclick: openMakeWithAi }, icon('sparkles'), 'Make with AI')) : null;
 let visQuery = '';
 function renderVisualsPane(keepScroll) {       // keepScroll: Duplicate, Delete and Edit leave the list where it was (New puts its item at the top, so it starts from the top)
   const pane = $('paneVisuals'), prev = keepScroll && pane.querySelector('.pane-body'), top = prev ? prev.scrollTop : 0;
@@ -12882,7 +13021,8 @@ function renderVisualsPane(keepScroll) {       // keepScroll: Duplicate, Delete 
     h('div', { class: 'row' }, h('button', { class: 'btn primary sm', title: 'Design a new visual', onclick: newLibraryVisual }, icon('plus'), 'New'),
       search,
       h('button', { class: 'btn icon sm ghost', title: 'Save your library to a file', 'aria-label': 'Save library', onclick: exportLibrary }, icon('download')),
-      h('button', { class: 'btn icon sm ghost', title: 'Load a library file', 'aria-label': 'Load library', onclick: () => $('fileLib').click() }, icon('upload')))));
+      h('button', { class: 'btn icon sm ghost', title: 'Load a library file', 'aria-label': 'Load library', onclick: () => $('fileLib').click() }, icon('upload'))),
+    makeWithAiRow()));
   const body = h('div', { class: 'pane-body' });
   pane.appendChild(body);
   function drawGrid() {
@@ -12900,14 +13040,21 @@ function exportLibrary() {
   download('video-redline-library.json', JSON.stringify({ tool: 'video-review-library', version: 1, visuals: lib.visuals, styles: lib.styles, starred: lib.starred, defStyle: lib.defStyle }, null, 2), 'application/json');
   toast('Library saved to your Downloads folder.');
 }
-async function importLibraryFile(file) {
-  let d; try { d = JSON.parse(await readFile(file)); } catch (e) { toast('That is not a library file.'); return; }
-  if (!d || !Array.isArray(d.visuals)) { toast('That is not a library file.'); return; }
+// Adds what a library file holds (already parsed) to the library: how many visuals it added, or -1 when it is not a library file. Used by Load and by the paste box of Make with AI.
+function addLibraryData(d) {
+  if (!d || !Array.isArray(d.visuals)) return -1;
   if (Array.isArray(d.styles)) importStyleRecords(d.styles);
   let n = 0;
-  d.visuals.forEach(it => { const nv = normVisual(it.visual); if (nv) { lib.visuals.push({ id: uid(), name: String(it.name || 'Imported visual'), visual: nv, created: Date.now() }); n++; } });
+  d.visuals.forEach(it => { const nv = it && normVisual(it.visual); if (nv) { lib.visuals.push({ id: uid(), name: String(it.name || 'Imported visual'), visual: nv, created: Date.now() }); n++; } });
   (d.starred || []).forEach(id => { if (lib.starred.indexOf(id) < 0) lib.starred.push(id); });
-  saveLib(); renderVisualsPane(); toast('Added ' + n + ' visual' + (n === 1 ? '' : 's') + ' to your library.');
+  saveLib(); renderVisualsPane();
+  return n;
+}
+async function importLibraryFile(file) {
+  let d; try { d = JSON.parse(await readFile(file)); } catch (e) { toast('That is not a library file.'); return; }
+  const n = addLibraryData(d);
+  if (n < 0) { toast('That is not a library file.'); return; }
+  toast('Added ' + n + ' visual' + (n === 1 ? '' : 's') + ' to your library.');
 }
 $('fileLib').addEventListener('change', () => { const f = $('fileLib').files[0]; if (f) importLibraryFile(f); $('fileLib').value = ''; });
 
@@ -12953,7 +13100,8 @@ function renderStylesPane() {
     onclick: () => { styleFiltersOpen = !styleFiltersOpen; filterRow.hidden = !styleFiltersOpen; filterBtn.setAttribute('aria-expanded', String(styleFiltersOpen)); } }, 'Filter', icon('chevron-down'));
   pane.appendChild(h('div', { class: 'lib-head' }, h('div', { class: 'row' }, search, filterBtn,
     h('button', { class: 'btn icon sm', title: 'Add a design system from Open Design (its DESIGN.md and tokens.css files)', 'aria-label': 'Import a design system', onclick: () => $('fileStyle').click() }, icon('import'))),
-    filterRow));
+    filterRow,
+    makeWithAiRow()));
   const body = h('div', { class: 'pane-body' }); pane.appendChild(body);
   body.addEventListener('scroll', () => { if (!styleScrollTimer) styleScrollTimer = setTimeout(() => { styleScrollTimer = null; styleRenderVisible(body); }, 60); });
   function drawGrid() {
@@ -13008,9 +13156,150 @@ async function importStyleFiles(files) {
 }
 $('fileStyle').addEventListener('change', () => { const f = $('fileStyle').files; if (f.length) importStyleFiles(f); $('fileStyle').value = ''; });
 
+/* ---- src/js/06-make-with-ai.js ---- */
+/* =====================================================================
+   06 - Make a visual with an AI (the "Make with AI" button of the Visuals and Styles tabs)
+   Builds a prompt that you paste into any AI assistant. The prompt holds the library file format, the kinds, options and styles of THIS
+   build (read from VIS and the style list, so it cannot go out of date) and two worked examples. The assistant answers with a library
+   file, and the Load button of the Visuals tab (importLibraryFile in 06-library.js) adds it. This page sends nothing anywhere.
+   ===================================================================== */
+const AI_REQUEST_PLACEHOLDER = '(Describe the visual or visuals you want here, then send this message.)';
+
+// Two real entries built by the same code that reads the file, so an example can never be one the tool would not accept
+function aiPromptExamples() {
+  const ids = ['shortcut', 'steps'].filter(id => kindById(id));
+  VIS.KINDS.forEach(k => { if (ids.length < 2 && ids.indexOf(k.id) < 0) ids.push(k.id); });
+  return ids.map(id => {
+    const k = kindById(id), nv = normVisual({ kind: id, content: k.sample });
+    nv.style = 'default'; nv.textBy = 'me';
+    return { name: k.sample.title, visual: nv };
+  }).concat(kindById('big-number') ? [aiPromptNoteExample()] : []);
+}
+// The third example shows a "note", built by the same code, so the AI sees the exact key and how a motion request is written
+function aiPromptNoteExample() {
+  const nv = normVisual({ kind: 'big-number', content: { title: '10x', body: 'faster reports' }, opts: { scale: 1.3 },
+    note: 'Turn the number slowly around its vertical axis in 3D, like a rotating sign, for as long as it is on screen.' });
+  nv.style = 'default'; nv.textBy = 'me';
+  return { name: 'Rotating 10x', visual: nv };
+}
+
+function buildMakeAiPrompt(request) {
+  const O = VIS.OPTIONS, fieldLabel = (k, key) => { const f = k.fields.find(x => x.key === key); return f ? f.label : key; };
+  const kinds = VIS.KINDS.map(k => '- "' + k.id + '" (' + k.label + '): ' + k.blurb + ' title = ' + fieldLabel(k, 'title') + '; body = ' + fieldLabel(k, 'body') + '.');
+  const pointerKinds = VIS.KINDS.filter(k => (VIS.OPTION_USE[k.id] || []).indexOf('pointer') >= 0).map(k => '"' + k.id + '"');
+  const q = list => list.map(x => '"' + x + '"').join(', ');
+  const example = JSON.stringify({ tool: 'video-review-library', version: 1, visuals: aiPromptExamples() }, null, 2);
+  const want = (request || '').trim() || AI_REQUEST_PLACEHOLDER;
+  return [
+    'I use a video-editing helper called Video Redline. It keeps a library of "visuals": small styled overlays (a list, a flow diagram, a big number and so on) that I place on top of my videos. Please design visuals for my library.',
+    '',
+    'WHAT TO REPLY WITH',
+    'Reply with one library file: a single JSON code block and nothing else, except at most two plain sentences before it (for example, to say that a request did not fit any kind exactly). I will save the block as my-visuals.json and load it with the Load button of the Visuals tab, so it must be valid JSON: double quotes, no comments, no trailing commas. If my request is unclear, ask one short question first instead.',
+    '',
+    'THE FILE',
+    'Top level: { "tool": "video-review-library", "version": 1, "visuals": [ one object per visual ] }',
+    'Each visual object has a "name" (a short name for my library list) and a "visual" with the keys "kind", "content", "opts", "style" and "textBy", and optionally "note", described below.',
+    '',
+    '"kind": use exactly one of these ids. No other kind exists, and an id that is not on this list is shown as a title card.',
+    kinds.join('\n'),
+    'If my idea does not fit any kind, use the closest one and tell me in a sentence what is different. Never invent a kind.',
+    '',
+    '"content": { "title": "...", "body": "..." }. Plain text only (no markdown or HTML); write \\n for a new line inside a string. Keep the words short, because people read them on a video in a few seconds. Nothing except "title" and "body" is kept.',
+    '',
+    '"opts": all optional; leave a key out to get its default.',
+    '- "align": ' + q(O.align),
+    '- "scale": a number from ' + O.scaleRange.min + ' to ' + O.scaleRange.max + ' (text size; 1 is normal)',
+    '- "bg": ' + q(O.bg) + ' (the panel behind the words)',
+    '- "accent": a colour such as "#2f6feb", or "" to keep the style\'s own accent',
+    '- "pointer": ' + q(O.pointer) + '. Only these kinds use it: ' + (pointerKinds.join(', ') || 'none') + '.',
+    '',
+    '"style": the id of a design look, or "default". Use "default" unless I ask for a look. Valid ids: ' + allStyles().map(s => s.id).join(', ') + '.',
+    '',
+    '"textBy": "me" when the words are written in "content" (do this unless I ask you to leave the words open). "ai" means the words are left empty to be written later.',
+    '',
+    '"note": optional. Plain text, up to ' + NOTE_MAX + ' characters: an instruction for the AI video editor that is added to the marker Comment every time I use this visual, so I do not have to write it again. Use it for anything the picture itself cannot show, such as movement, a 3D look, an animation or timing. Write it as a direct instruction, for example "Turn the number slowly around its vertical axis in 3D, like a rotating sign, for as long as it is on screen." Nothing moves inside the tool itself; the note is what makes the editor do it. If I ask for 3D, a spin, a fade or any other motion, choose the closest kind and put the motion in "note". Leave "note" out when I ask for nothing special.',
+    '',
+    'Leave out "id" and any dates; the tool adds them.',
+    '',
+    'EXAMPLE OF A VALID FILE',
+    example,
+    '',
+    'MY REQUEST',
+    want
+  ].join('\n');
+}
+
+function copyPlainText(text, okMsg, failMsg) {
+  const fallback = () => {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0' }); ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) { /* ignore */ }
+    ta.remove(); toast(ok ? okMsg : failMsg, ok ? undefined : 6000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast(okMsg), fallback);
+  else fallback();
+}
+
+// The AI's answer as pasted: a ```json fence around it, or a sentence before and after it, is fine; a bare list of visuals is accepted too
+function parsePastedLibrary(text) {
+  let s = String(text || '').trim();
+  const fence = /```[a-z]*\s*([\s\S]*?)```/i.exec(s);
+  if (fence) s = fence[1].trim();
+  const attempt = t => { try { return JSON.parse(t); } catch (e) { return null; } };
+  let d = attempt(s);
+  if (!d) { const a = s.indexOf('{'), b = s.lastIndexOf('}'); if (a >= 0 && b > a) d = attempt(s.slice(a, b + 1)); }
+  return Array.isArray(d) ? { visuals: d } : d;
+}
+
+function openMakeWithAi() {
+  if (!HAS_VIS) { toast('The visuals module is missing from this page.'); return; }
+  const ask = h('textarea', { rows: 3, 'aria-label': 'What visual do you want', placeholder: 'For example: three short tips for working with tables, in a warm style' });
+  const out = h('textarea', { rows: 9, readonly: true, 'aria-label': 'The prompt to copy', style: 'font:11.5px/1.45 ui-monospace,Consolas,monospace' });
+  const redraw = () => { out.value = buildMakeAiPrompt(ask.value); };
+  ask.addEventListener('input', redraw); redraw();
+  const kindNames = VIS.KINDS.map(k => k.label.toLowerCase()).join(', ');
+  const paste = h('textarea', { rows: 4, 'aria-label': 'The AI answer', placeholder: 'Paste the AI’s whole answer here' });
+  const note = h('div', { class: 'hint', style: 'min-height:18px' });
+  const say = (msg, bad) => { note.textContent = msg; note.style.color = bad ? 'var(--danger)' : ''; };
+  const addPasted = () => {
+    if (!paste.value.trim()) { say('Paste the AI’s answer into the box first.', true); return; }
+    const d = parsePastedLibrary(paste.value);
+    if (!d || !Array.isArray(d.visuals)) { say('That is not a library file. Paste the whole answer, from the first { to the last }. It needs a "visuals" list.', true); return; }
+    const unknown = d.visuals.filter(it => it && it.visual && typeof it.visual === 'object' && !kindById(it.visual.kind) && VIS.normalize(it.visual).kind === VIS.defaultKind('visual')).length;   // a kind this tool lacks becomes a title card
+    const n = addLibraryData(d);
+    if (n < 1) { say('Nothing was added: none of the entries had a "visual" in it.', true); return; }
+    closeModal();
+    if (ui.tab !== 'visuals') showTab('visuals');       // opened from the Styles tab: show where the new visuals went
+    const list = $('paneVisuals').querySelector('.pane-body'); if (list) list.scrollTop = list.scrollHeight;
+    toast('Added ' + n + ' visual' + (n === 1 ? '' : 's') + ' at the bottom of your library.' + (unknown ? ' ' + unknown + ' used a kind this tool does not have, so check ' + (unknown === 1 ? 'it' : 'them') + '.' : ''), unknown ? 7000 : undefined);
+  };
+  const pasteBox = h('div', { style: 'margin-top:16px;padding-top:14px;border-top:1px solid var(--line)' },
+    h('label', { class: 'field' }, 'Got the AI’s answer? Paste it here', paste),
+    h('div', { style: 'display:flex;align-items:center;gap:10px;margin-top:8px' }, h('button', { class: 'btn sm', onclick: addPasted }, icon('plus'), 'Add to my library'), note));
+  const modal = openModal({
+    title: 'Make visuals with an AI',
+    narrow: true,
+    body: h('div', {},
+      h('p', { class: 'hint', style: 'margin:0 0 12px', text: 'Let an AI assistant (Claude, ChatGPT, Gemini or any other) design visuals for your library. It does not connect to this page, and this page sends nothing anywhere.' }),
+      h('ol', { style: 'margin:0 0 16px 18px;padding:0;display:grid;gap:8px;list-style:decimal;font-size:13px;line-height:1.5;color:var(--text-2)' },
+        h('li', {}, 'Say what you want below (optional: you can also tell your AI after you paste).'),
+        h('li', {}, 'Press ', h('b', { text: 'Copy prompt' }), ' and paste it into your AI assistant.'),
+        h('li', {}, 'It answers with a block of text. Copy all of it.'),
+        h('li', {}, 'Paste it into the box at the bottom of this window and press ', h('b', { text: 'Add to my library' }), '. (Or save it as a file that ends in .json, for example my-visuals.json, and use the upload icon at the top of the Visuals tab.)')),
+      h('label', { class: 'field' }, 'What visual do you want?', ask),
+      h('div', { class: 'hint', style: 'margin:12px 0 8px', text: 'The AI can combine the ' + VIS.KINDS.length + ' kinds this tool has (' + kindNames + ') with any of its ' + allStyles().length + ' styles. It cannot add a brand-new kind; the prompt tells it so.' }),
+      h('details', {}, h('summary', { style: 'cursor:pointer;color:var(--text-2);font-size:12px;margin-bottom:8px', text: 'Show the prompt' }), out),
+      pasteBox),
+    footer: [h('button', { class: 'btn', onclick: closeModal }, 'Close'),
+      h('button', { class: 'btn primary', onclick: () => copyPlainText(out.value, 'Prompt copied. Paste it into your AI assistant.', 'Could not copy. Open "Show the prompt", select all of it and copy.') }, icon('copy'), 'Copy prompt')]
+  });
+  mountIcons(modal.box);
+  ask.focus();
+}
+
 /* ---- src/js/07-io.js ---- */
 /* =====================================================================
-   07 - Export for Claude, sessions, Camtasia import, dropping files
+   07 - Export for Claude, sessions, dropping files
    ===================================================================== */
 const baseName = () => meta.name.replace(/\.[^.\\/]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
 const pct = v => +(v * 100).toFixed(1);
@@ -13096,6 +13385,7 @@ function buildJson(opts) {
           if (spoken) vv.spoken = spoken;
           if (spokenCut(spoken)) vv.spokenTruncated = true;                  // only the first part of what was said is here
         } else vv.textBy = 'me';
+        if (!(opts && opts.keepHidden)) delete vv.note;                          // a library visual's note was put into the Comment when it was used; the Comment is what the assistant reads
         o.visual = vv;
       }
       if (m.origin) o.origin = m.origin;
@@ -13149,6 +13439,8 @@ function cleanMarkers(arr, from) {
     let type = String(o.type == null ? 'note' : o.type).replace(/[\[\]\r\n]/g, '').trim();
     if (type.toLowerCase() === 'custom') type = '';
     const std = TYPE_NAMES.find(t => t === type.toLowerCase()); if (std) type = std;
+    const retired = RETIRED_TYPES.find(t => t === type.toLowerCase());
+    if (retired) type = 'visual';
     const boxes = [];
     (Array.isArray(o.boxes) ? o.boxes : []).forEach(b => {
       let r = { x: +b.x, y: +b.y, w: +b.w, h: +b.h };
@@ -13157,7 +13449,7 @@ function cleanMarkers(arr, from) {
       if (r.w >= 1 && r.h >= 1) boxes.push(Object.assign({ id: uid() }, r));
     });
     const m = { id: uid(), type, start: T(s), end: T(e), comment: String(o.comment == null ? '' : o.comment), boxes };
-    if (isVisualType(type)) m.visual = normVisual(o.visual) || defaultVisual(type);
+    if (isVisualType(type)) m.visual = normVisual(o.visual) || defaultVisual(retired || type);
     if (o.origin && typeof o.origin === 'object') m.origin = cleanOrigin(o.origin);
     out.push(m);
   });
@@ -13201,29 +13493,6 @@ async function loadSessionText(text, fileName) {
   toast('Loaded ' + loaded + ' marker' + (loaded === 1 ? '' : 's') + '.' + (n < loaded ? ' The Cleanup tab took out ' + (loaded - n) + ' automatic cut' + (loaded - n === 1 ? '' : 's') + ' that do not belong to the transcript it has open.' : '') + (said ? ' ' + said : ''), (n < loaded || said) ? 7000 : undefined);
   return true;
 }
-// Camtasia web export: media/xmpFile.xml lists markers under xmpDM:markers (name + startTime in milliseconds).
-async function loadCamtasiaFile(file) {
-  if (needVideo()) return;
-  const doc = new DOMParser().parseFromString(await readFile(file), 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) { toast('Could not read that file. Pick media/xmpFile.xml from the Camtasia export.', 5000); return; }
-  const val = (el, name) => {
-    for (const a of Array.from(el.attributes)) if (a.localName === name) return a.value;
-    for (const c of Array.from(el.children)) if (c.localName === name) return c.textContent;
-    return null;
-  };
-  const all = Array.from(doc.getElementsByTagName('*')), zones = all.filter(e => e.localName === 'markers');
-  const pool = zones.length ? zones.reduce((acc, z) => acc.concat(Array.from(z.getElementsByTagName('*'))), []) : all;
-  const found = [];
-  pool.forEach(el => {
-    const ms = parseFloat(val(el, 'startTime'));
-    if (isFinite(ms) && ms >= 0) found.push({ start: ms / 1000, end: ms / 1000 + 1, type: 'note', comment: (val(el, 'name') || '').trim() });
-  });
-  if (!found.length) { toast('No markers found in that file.', 4000); return; }
-  const add = cleanMarkers(found, null);
-  markers = markers.concat(add);
-  commit(); changed();
-  toast('Imported ' + add.length + ' Camtasia marker' + (add.length === 1 ? '' : 's') + ' as notes.');
-}
 
 /* ---------- files from the file pickers and from drag and drop ---------- */
 const isVideoFile = f => (f.type && f.type.indexOf('video/') === 0) || /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(f.name);
@@ -13232,33 +13501,39 @@ async function loadTranscriptFile(f) {                // .srt / .vtt: subtitles 
   let text; try { text = await readFile(f); } catch (e) { toast('That file could not be read.'); return; }
   if (!cleanupOpenTranscript(text, f.name)) toast('That does not look like a video file.');
 }
-function handleFile(f) {
+// The handle of the first dropped file (a promise, or null). It has to be asked for while the drop event is still running; a handle lets a saved session open a dropped video again later.
+const dropHandle = e => {
+  const it = e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items[0];
+  return it && typeof it.getAsFileSystemHandle === 'function' ? it.getAsFileSystemHandle().catch(() => null) : null;
+};
+function handleFile(f, handle) {
   if (/\.json$/i.test(f.name)) loadSessionFile(f);      // a saved session, or a transcript (that one opens in the Cleanup tab)
-  else if (/\.xml$/i.test(f.name)) loadCamtasiaFile(f);
   else if (/\.(srt|vtt)$/i.test(f.name)) loadTranscriptFile(f);
-  else if (isVideoFile(f)) loadVideo(f);
+  else if (isVideoFile(f)) { if (handle) handle.then(hd => loadVideo(f, hd)); else loadVideo(f); }
   else toast('That does not look like a video file.');
 }
 const pick = (input, fn) => { input.addEventListener('change', () => { if (input.files[0]) fn(input.files[0]); input.value = ''; }); };
-pick($('fileVideo'), loadVideo); pick($('fileSession'), loadSessionFile); pick($('fileCam'), loadCamtasiaFile);
+pick($('fileVideo'), loadVideo); pick($('fileSession'), loadSessionFile);
 window.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('over'); });
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) dropEl.classList.remove('over'); });
 // The Cleanup panel takes any file dropped on it as a transcript and stops the drop there, so the window handler below never sees it:
-// clear the highlight first, and route the dropped files like anywhere else: one file is a video, saved session, transcript or Camtasia file,
+// clear the highlight first, and route the dropped files like anywhere else: one file is a video, saved session or transcript,
 // several files or a .md / .css file are design system files for the style importer (the panel would only say "does not look like a transcript").
 window.addEventListener('drop', () => dropEl.classList.remove('over'), true);
 $('cleanupHost').addEventListener('drop', e => {
   const fl = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
   if (!fl.length) return;
+  const hd = dropHandle(e);
   e.preventDefault(); e.stopPropagation();
-  if (fl.length > 1 || /\.(md|css)$/i.test(fl[0].name)) importStyleFiles(fl); else handleFile(fl[0]);
+  if (fl.length > 1 || /\.(md|css)$/i.test(fl[0].name)) importStyleFiles(fl); else handleFile(fl[0], hd);
 }, true);
 window.addEventListener('drop', e => {
   e.preventDefault(); dropEl.classList.remove('over');
   const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
   if (!files.length) return;
+  const hd = dropHandle(e);
   if (files.length > 1 || /\.(md|css)$/i.test(files[0].name)) importStyleFiles(files);      // design system files go to the style importer
-  else handleFile(files[0]);
+  else handleFile(files[0], hd);
 });
 window.addEventListener('pagehide', saveNow);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
@@ -13327,6 +13602,40 @@ async function sessPut(dir, name, text) {
   await w.write(text); await w.close();
 }
 function sessForget() { SESS.current = null; SESS.curVideo = ''; }
+
+/* ---------- remembering the videos (a session only holds the video's name, so the page keeps a handle to each video it opened) ---------- */
+const VID_TYPES = [{ description: 'Video files', accept: { 'video/*': ['.mp4', '.mov', '.m4v', '.webm'] } }];
+const vidKey = name => 'video:' + name;
+function vidRemember(name, handle) { if (handle && handle.kind === 'file') idbSet(vidKey(name), handle); }
+// The File the page was allowed to keep for this video name, or null: never opened with the picker, moved or deleted, or the browser's OK was refused.
+async function vidRecall(name) {
+  const handle = await idbGet(vidKey(name));
+  if (!handle || typeof handle.queryPermission !== 'function') return null;
+  try {
+    let p = await handle.queryPermission({ mode: 'read' });
+    if (p !== 'granted') p = await handle.requestPermission({ mode: 'read' });          // (needs the click that opened the session: it is still fresh)
+    return p === 'granted' ? { file: await handle.getFile(), handle } : null;
+  } catch (e) { return null; }
+}
+// The browser's own file picker; unlike the hidden file input it hands back a handle the page can keep. Throws AbortError when cancelled.
+async function vidPick() {
+  const [handle] = await window.showOpenFilePicker({ id: 'vrt-video', startIn: 'videos', types: VID_TYPES });
+  return { file: await handle.getFile(), handle };
+}
+// Open video…: the picker above where the browser has it, otherwise the plain file input.
+async function openVideoPicker() {
+  if (typeof window.showOpenFilePicker !== 'function') { $('fileVideo').click(); return; }
+  try { const p = await vidPick(); loadVideo(p.file, p.handle); }
+  catch (e) { if (!e || e.name !== 'AbortError') toast('The browser would not open its file picker. Drop the video onto the page instead.', 6000); }
+}
+// Resolves true when the video just given to loadVideo is ready (false when the browser could not play it)
+function videoReady() {
+  return new Promise(res => {
+    const done = ok => { video.removeEventListener('loadedmetadata', yes); video.removeEventListener('error', no); res(ok && !!meta); };
+    const yes = () => done(true), no = () => done(false);
+    video.addEventListener('loadedmetadata', yes); video.addEventListener('error', no);       // (added after the page's own listeners, so `meta` is set by then)
+  });
+}
 const sessFail = e => e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
   ? 'The browser no longer allows this folder. Open File and allow it again.'
   : e && e.name === 'NotFoundError' ? 'That session or folder cannot be found any more.' : 'That did not work (' + ((e && e.message) || 'unknown problem') + ').';
@@ -13407,7 +13716,27 @@ function sessWhen(ms) {
   return sameDay ? 'today ' + time : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' }) + ' ' + time;
 }
 
+// Clicking a session opens the video it was made for as well, so the person does not have to find it first: the page's remembered copy of it,
+// otherwise the file picker (asked for in the toast). Returns false when there is still no video to put the markers on.
+async function sessOpenVideo(s) {
+  if (!s.video || (meta && meta.name === s.video)) return true;               // the right video is open already (or the session names none)
+  let got = await vidRecall(s.video);
+  if (!got) {
+    if (typeof window.showOpenFilePicker !== 'function') return true;         // this browser has no picker like that: the old way ("Open a video first", or “Load it anyway?” for another video)
+    toast('Pick the video “' + s.video + '” to open this session.', 6000);
+    try { got = await vidPick(); }
+    catch (e) {
+      if (e && e.name !== 'AbortError') toast('The browser would not open its file picker. Open the video with Open video…, then pick the session again.', 6000);
+      else if (!meta) toast('Not opened: this session needs its video “' + s.video + '”.', 5000);
+      return !!meta;                                                          // (cancelled with another video open: the question “Load it anyway?” follows)
+    }
+  }
+  const ready = videoReady();
+  loadVideo(got.file, got.handle);
+  return await ready;
+}
 async function sessOpen(s) {
+  if (!(await sessOpenVideo(s))) return;
   if (needVideo()) return;
   let text;
   try { text = await (await (await SESS.dir.getFileHandle(s.fname)).getFile()).text(); } catch (e) { toast('Could not read “' + s.name + '”. ' + sessFail(e), 5000); return; }
@@ -13487,7 +13816,6 @@ async function sessRender(box) {               // fills the "Saved sessions" par
         icon('folder-open'), SESS.dir.name || 'folder')));
       if (!rows.length) kids.push(note('No saved sessions yet. Use Save session below and it shows up here.'));
       else {
-        if (!meta) kids.push(note('Open a video first, then pick a session to load its markers.'));
         kids.push(h('div', { class: 'sess-list' }, rows.map(s => sessRow(s, box))));
       }
     }
@@ -13540,11 +13868,10 @@ async function openFileMenu() {
   const item = (ic, label, fn) => h('button', { role: 'menuitem', onclick: () => { closePopover(); fn(); } }, icon(ic), label);
   const box = h('div', { class: 'sess-box' });
   const menu = h('div', { class: 'menu sess-menu', role: 'menu' },
-    item('folder-open', 'Open video…', () => $('fileVideo').click()), h('hr'),
+    item('folder-open', 'Open video…', openVideoPicker), h('hr'),
     box, h('hr'),
     item('save', 'Save session', saveSession), h('hr'),
-    item('download', 'Download session file (JSON)', saveSessionFile), item('upload', 'Load session from file…', () => $('fileSession').click()),
-    item('import', 'Import Camtasia markers…', () => $('fileCam').click()));
+    item('download', 'Download session file (JSON)', saveSessionFile), item('upload', 'Load session from file…', () => $('fileSession').click()));
   await sessRender(box);
   if (token === openFileMenu.n) openPopover($('btnFile'), menu);          // (a later click on File wins)
 }
@@ -14052,8 +14379,8 @@ document.addEventListener('keydown', e => {
     case 'Delete': case 'Backspace': {
       e.preventDefault();
       const m = byId(selId);
-      // The key only removes a box you have clicked; whole markers are removed with their own Delete button.
-      if (m && selBox) deleteBox(m, selBox); else toast('Click a box on the video first, then press Delete. To remove a marker, use its Delete button.', 4200);
+      // A box you have clicked goes first; otherwise the selected marker goes (Undo brings it back).
+      if (m && selBox) deleteBox(m, selBox); else if (m) deleteMarker(m.id); else toast('Click a marker on the timeline first, then press Delete.', 3600);
       break;
     }
   }
@@ -14076,8 +14403,9 @@ function showShortcuts() {
     title: 'Keyboard and mouse shortcuts', narrow: true,
     body: h('div', { class: 'keylist' },
       h('h4', { text: 'Playing' }), row(['Space'], 'Play or pause'), row(['←'], 'Back one frame'), row(['→'], 'Forward one frame'), row(['Shift', '←'], 'Back one second'), row(['Shift', '→'], 'Forward one second'),
-      h('h4', { text: 'Markers' }), row(['M'], 'Add a marker (1 second)'), row(['I'], 'Set the in point'), row(['O'], 'Set the out point, then M uses both'), row([MOD, 'Z'], 'Undo'), row([MOD, 'Shift', 'Z'], 'Redo'), row(['Delete'], 'Remove the box you clicked'),
+      h('h4', { text: 'Markers' }), row(['M'], 'Add a marker (1 second)'), row(['I'], 'Set the in point'), row(['O'], 'Set the out point, then M uses both'), row([MOD, 'Z'], 'Undo'), row([MOD, 'Shift', 'Z'], 'Redo'), row(['Delete'], 'Remove the box you clicked, or else the selected marker'),
       h('h4', { text: 'Timeline' }), row(['+'], 'Zoom in'), row(['-'], 'Zoom out'), row(['0'], 'Show the whole video'), row([MOD, 'wheel'], 'Zoom at the mouse'), row(['Shift', 'wheel'], 'Move along the timeline'),
+      h('h4', { text: 'Zoom the picture' }), row(['wheel'], 'Zoom in or out on the video, at the mouse'), row(['drag'], 'Move a zoomed picture (when no marker is picked)'), row(['Shift', 'drag'], 'Move a zoomed picture, even with a marker picked'),
       h('h4', { text: 'With the mouse' }), row(['click'], 'Jump to that moment'), row(['drag on a track'], 'Mark a new range'), row(['drag a clip'], 'Move it'), row(['drag a clip end'], 'Resize it'), row(['drag on the video'], 'Draw a box'), row(['?'], 'Show this list')),
     footer: h('button', { class: 'btn primary', onclick: closeModal }, 'Done')
   });
@@ -14125,8 +14453,8 @@ function boot() {
     if (j < 0) return;
     e.preventDefault(); e.stopPropagation(); tabEls[j].focus(); showTab(tabEls[j].dataset.tab);
   }));
-  $('btnOpen').addEventListener('click', () => $('fileVideo').click());
-  $('btnOpen2').addEventListener('click', () => $('fileVideo').click());
+  $('btnOpen').addEventListener('click', openVideoPicker);
+  $('btnOpen2').addEventListener('click', openVideoPicker);
   $('btnFile').addEventListener('click', openFileMenu);
   $('btnCopy').addEventListener('click', copyMarkdown);
   $('btnExport').addEventListener('click', exportForClaude);

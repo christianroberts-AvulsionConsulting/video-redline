@@ -145,7 +145,7 @@ function renderTimeline() {
     heads.appendChild(h('div', { class: 'head', style: '--tc:' + colorOf('note') + ';top:0;height:64px' }, icon('layers'), 'Markers'));
     lanes.appendChild(h('div', { class: 'none', text: 'No markers yet. Press M, or drag on this track to mark a stretch.' }));
     lanes.appendChild(h('div', { class: 'trk', 'data-type': 'note', style: 'top:0;height:64px' }));
-    heads.style.height = lanes.style.height = '64px';
+    heads.style.minHeight = lanes.style.height = '64px';       // min-height, so the name column still stretches to the bottom and hides the playhead behind it
     return;
   }
   keys.forEach((k, ti) => {
@@ -168,7 +168,7 @@ function renderTimeline() {
     });
     y += th;
   });
-  heads.style.height = lanes.style.height = y + 'px';
+  heads.style.minHeight = lanes.style.height = y + 'px';
 }
 
 /* ---------- mouse on the timeline ----------
@@ -190,6 +190,7 @@ strip.addEventListener('pointerdown', e => {
   if (e.target.closest('#ruler')) { drag = { kind: 'scrub', x0: e.clientX, moved: false }; video.pause(); seekFrame(Math.floor(ff)); return; }
   if (clipEl) {
     const m = byId(clipEl.dataset.id), side = e.target.dataset.side;
+    selBox = null;                                                    // clicking the marker itself means Delete now removes the marker, not a box picked earlier
     selectMarker(m.id, { seek: false });
     drag = { kind: side === 'l' ? 'l' : side === 'r' ? 'r' : 'move', id: m.id, x0: e.clientX, ff0: ff, sF: F(m.start), eF: F(m.end), moved: false };
     return;
@@ -241,6 +242,20 @@ function endDrag() {
 }
 strip.addEventListener('pointerup', endDrag);
 strip.addEventListener('pointercancel', endDrag);
+
+// Right-click a marker: select it and offer Delete (Undo brings it back)
+strip.addEventListener('contextmenu', e => {
+  const clipEl = meta && e.target.closest && e.target.closest('.clip');
+  if (!clipEl) return;                                                // anywhere else the browser's own menu stays
+  e.preventDefault();
+  const m = byId(clipEl.dataset.id); if (!m) return;
+  selBox = null; selectMarker(m.id, { seek: false });
+  const x = e.clientX, y = e.clientY;
+  const menu = h('div', { class: 'menu', role: 'menu', style: 'min-width:170px' },
+    h('button', { role: 'menuitem', onclick: () => { closePopover(); deleteMarker(m.id); } }, icon('trash'), 'Delete marker'));
+  openPopover({ getBoundingClientRect: () => ({ left: x, right: x, top: y - 6, bottom: y - 6 }), contains: () => false }, menu);       // a point, not an element, to hang the menu on
+  const b = menu.querySelector('button'); if (b) b.focus();
+});
 
 /* ---------- the bar between the video and the timeline: drag to resize ---------- */
 // How tall the timeline may be: at most 62% of the window and at most what the page grid leaves room for (styles.css: 100vh - 340px, never under 150px).

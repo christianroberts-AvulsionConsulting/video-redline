@@ -30,6 +30,8 @@ tools/              the optional transcription helper (Python sources, set-up an
 
 After editing, run `node build.js` (needs [Node.js](https://nodejs.org/)) to rebuild `video-redline.html`. Users never need to do this.
 
+The prompt behind the **Make with AI** button (`src/js/06-make-with-ai.js`; the button itself is `makeWithAiRow` in `06-library.js`, shown at the top of both the Visuals and Styles tabs) is generated when the button is pressed, from `VIS.KINDS`, `VIS.OPTIONS`, `VIS.OPTION_USE` and the style list, so adding a kind or an option in `src/vendor/visuals.js` needs no change there. Its two worked examples prefer the kinds `shortcut` and `steps` and fall back to the first two kinds. The file it asks the assistant for is the library file that `exportLibrary` and `importLibraryFile` in `06-library.js` already read and write.
+
 Some names keep their old spelling on purpose, because other things point at them: `open_video_review.pyw` (icons made before the product was renamed run it), the helper's `/status` identity `video-review-helper`, the storage keys `vrt:*`, the session and export format ids, the export file name endings `-review.md` and `-review.json`, the registry names `VideoReviewHelper` and `videoreview://`, the environment variables `VRT_*`, and the file names of the modules in `src/vendor/`. The opener also opens `video-review.html` when `video-redline.html` is missing (an install made before the rename).
 
 ## Publishing
@@ -42,7 +44,7 @@ To change the version number: edit `VERSION`, the line `Version ...` near the to
 
 Build the release ZIP from the repository, never from a folder on which the set-up has been run. A set-up folder holds FFmpeg with the GPL programs x264 and x265, files from Intel and NVIDIA, and about 1.3 GB of speech models that need credit (see `THIRD-PARTY-NOTICES.md`, sections 2 and 3). The script `make-release-zip.py` does it: `python make-release-zip.py` writes `dist/video-redline-<VERSION>.zip` (the page, `tools`, `sessions/README.txt`, `README.md`, `LICENSE`, `THIRD-PARTY-NOTICES.md` and the Open Design notice, no folder around them), puts the right line endings and the executable mark on the Mac scripts, and refuses to finish when a rule below is broken. `python make-release-zip.py --check <zip>` checks a ZIP that you downloaded.
 
-Before you announce a release, run `node build.js --check` (it says whether `video-redline.html` is up to date with `src/`; `make-release-zip.py` runs it for you when Node is installed), then open the ZIP and check (the script already does the first four):
+Before you build a release, run the three Python suites in `tools/tests/` (from the `tools` folder: `venv\Scripts\python.exe -m unittest discover -s tests -v`; `test_launcher.py` there runs the real hidden launcher, because a launcher with a broken line can still compile and then fail on the first person's PC), and edit nothing after the last run. Before you announce a release, run `node build.js --check` (it says whether `video-redline.html` is up to date with `src/`; `make-release-zip.py` runs it for you when Node is installed), then open the ZIP and check (the script already does the first four):
 
 - there is no folder called `venv`, `python`, `uv`, `uv-cache` or `hf-cache`, and no `.onnx`, `.bin` or `.dll` file;
 - `LICENSE`, `THIRD-PARTY-NOTICES.md` and `src/vendor/NOTICE-open-design.txt` are inside;

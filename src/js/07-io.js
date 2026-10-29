@@ -1,5 +1,5 @@
 /* =====================================================================
-   07 - Export for Claude, sessions, Camtasia import, dropping files
+   07 - Export for Claude, sessions, dropping files
    ===================================================================== */
 const baseName = () => meta.name.replace(/\.[^.\\/]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
 const pct = v => +(v * 100).toFixed(1);
@@ -85,6 +85,7 @@ function buildJson(opts) {
           if (spoken) vv.spoken = spoken;
           if (spokenCut(spoken)) vv.spokenTruncated = true;                  // only the first part of what was said is here
         } else vv.textBy = 'me';
+        if (!(opts && opts.keepHidden)) delete vv.note;                          // a library visual's note was put into the Comment when it was used; the Comment is what the assistant reads
         o.visual = vv;
       }
       if (m.origin) o.origin = m.origin;
@@ -138,6 +139,8 @@ function cleanMarkers(arr, from) {
     let type = String(o.type == null ? 'note' : o.type).replace(/[\[\]\r\n]/g, '').trim();
     if (type.toLowerCase() === 'custom') type = '';
     const std = TYPE_NAMES.find(t => t === type.toLowerCase()); if (std) type = std;
+    const retired = RETIRED_TYPES.find(t => t === type.toLowerCase());
+    if (retired) type = 'visual';
     const boxes = [];
     (Array.isArray(o.boxes) ? o.boxes : []).forEach(b => {
       let r = { x: +b.x, y: +b.y, w: +b.w, h: +b.h };
@@ -146,7 +149,7 @@ function cleanMarkers(arr, from) {
       if (r.w >= 1 && r.h >= 1) boxes.push(Object.assign({ id: uid() }, r));
     });
     const m = { id: uid(), type, start: T(s), end: T(e), comment: String(o.comment == null ? '' : o.comment), boxes };
-    if (isVisualType(type)) m.visual = normVisual(o.visual) || defaultVisual(type);
+    if (isVisualType(type)) m.visual = normVisual(o.visual) || defaultVisual(retired || type);
     if (o.origin && typeof o.origin === 'object') m.origin = cleanOrigin(o.origin);
     out.push(m);
   });
@@ -190,29 +193,6 @@ async function loadSessionText(text, fileName) {
   toast('Loaded ' + loaded + ' marker' + (loaded === 1 ? '' : 's') + '.' + (n < loaded ? ' The Cleanup tab took out ' + (loaded - n) + ' automatic cut' + (loaded - n === 1 ? '' : 's') + ' that do not belong to the transcript it has open.' : '') + (said ? ' ' + said : ''), (n < loaded || said) ? 7000 : undefined);
   return true;
 }
-// Camtasia web export: media/xmpFile.xml lists markers under xmpDM:markers (name + startTime in milliseconds).
-async function loadCamtasiaFile(file) {
-  if (needVideo()) return;
-  const doc = new DOMParser().parseFromString(await readFile(file), 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) { toast('Could not read that file. Pick media/xmpFile.xml from the Camtasia export.', 5000); return; }
-  const val = (el, name) => {
-    for (const a of Array.from(el.attributes)) if (a.localName === name) return a.value;
-    for (const c of Array.from(el.children)) if (c.localName === name) return c.textContent;
-    return null;
-  };
-  const all = Array.from(doc.getElementsByTagName('*')), zones = all.filter(e => e.localName === 'markers');
-  const pool = zones.length ? zones.reduce((acc, z) => acc.concat(Array.from(z.getElementsByTagName('*'))), []) : all;
-  const found = [];
-  pool.forEach(el => {
-    const ms = parseFloat(val(el, 'startTime'));
-    if (isFinite(ms) && ms >= 0) found.push({ start: ms / 1000, end: ms / 1000 + 1, type: 'note', comment: (val(el, 'name') || '').trim() });
-  });
-  if (!found.length) { toast('No markers found in that file.', 4000); return; }
-  const add = cleanMarkers(found, null);
-  markers = markers.concat(add);
-  commit(); changed();
-  toast('Imported ' + add.length + ' Camtasia marker' + (add.length === 1 ? '' : 's') + ' as notes.');
-}
 
 /* ---------- files from the file pickers and from drag and drop ---------- */
 const isVideoFile = f => (f.type && f.type.indexOf('video/') === 0) || /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(f.name);
@@ -221,33 +201,39 @@ async function loadTranscriptFile(f) {                // .srt / .vtt: subtitles 
   let text; try { text = await readFile(f); } catch (e) { toast('That file could not be read.'); return; }
   if (!cleanupOpenTranscript(text, f.name)) toast('That does not look like a video file.');
 }
-function handleFile(f) {
+// The handle of the first dropped file (a promise, or null). It has to be asked for while the drop event is still running; a handle lets a saved session open a dropped video again later.
+const dropHandle = e => {
+  const it = e.dataTransfer && e.dataTransfer.items && e.dataTransfer.items[0];
+  return it && typeof it.getAsFileSystemHandle === 'function' ? it.getAsFileSystemHandle().catch(() => null) : null;
+};
+function handleFile(f, handle) {
   if (/\.json$/i.test(f.name)) loadSessionFile(f);      // a saved session, or a transcript (that one opens in the Cleanup tab)
-  else if (/\.xml$/i.test(f.name)) loadCamtasiaFile(f);
   else if (/\.(srt|vtt)$/i.test(f.name)) loadTranscriptFile(f);
-  else if (isVideoFile(f)) loadVideo(f);
+  else if (isVideoFile(f)) { if (handle) handle.then(hd => loadVideo(f, hd)); else loadVideo(f); }
   else toast('That does not look like a video file.');
 }
 const pick = (input, fn) => { input.addEventListener('change', () => { if (input.files[0]) fn(input.files[0]); input.value = ''; }); };
-pick($('fileVideo'), loadVideo); pick($('fileSession'), loadSessionFile); pick($('fileCam'), loadCamtasiaFile);
+pick($('fileVideo'), loadVideo); pick($('fileSession'), loadSessionFile);
 window.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('over'); });
 window.addEventListener('dragleave', e => { if (!e.relatedTarget) dropEl.classList.remove('over'); });
 // The Cleanup panel takes any file dropped on it as a transcript and stops the drop there, so the window handler below never sees it:
-// clear the highlight first, and route the dropped files like anywhere else: one file is a video, saved session, transcript or Camtasia file,
+// clear the highlight first, and route the dropped files like anywhere else: one file is a video, saved session or transcript,
 // several files or a .md / .css file are design system files for the style importer (the panel would only say "does not look like a transcript").
 window.addEventListener('drop', () => dropEl.classList.remove('over'), true);
 $('cleanupHost').addEventListener('drop', e => {
   const fl = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
   if (!fl.length) return;
+  const hd = dropHandle(e);
   e.preventDefault(); e.stopPropagation();
-  if (fl.length > 1 || /\.(md|css)$/i.test(fl[0].name)) importStyleFiles(fl); else handleFile(fl[0]);
+  if (fl.length > 1 || /\.(md|css)$/i.test(fl[0].name)) importStyleFiles(fl); else handleFile(fl[0], hd);
 }, true);
 window.addEventListener('drop', e => {
   e.preventDefault(); dropEl.classList.remove('over');
   const files = e.dataTransfer ? Array.from(e.dataTransfer.files) : [];
   if (!files.length) return;
+  const hd = dropHandle(e);
   if (files.length > 1 || /\.(md|css)$/i.test(files[0].name)) importStyleFiles(files);      // design system files go to the style importer
-  else handleFile(files[0]);
+  else handleFile(files[0], hd);
 });
 window.addEventListener('pagehide', saveNow);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });

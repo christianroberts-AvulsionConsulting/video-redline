@@ -49,8 +49,8 @@ document.addEventListener('keydown', e => {
     case 'Delete': case 'Backspace': {
       e.preventDefault();
       const m = byId(selId);
-      // The key only removes a box you have clicked; whole markers are removed with their own Delete button.
-      if (m && selBox) deleteBox(m, selBox); else toast('Click a box on the video first, then press Delete. To remove a marker, use its Delete button.', 4200);
+      // A box you have clicked goes first; otherwise the selected marker goes (Undo brings it back).
+      if (m && selBox) deleteBox(m, selBox); else if (m) deleteMarker(m.id); else toast('Click a marker on the timeline first, then press Delete.', 3600);
       break;
     }
   }
@@ -73,8 +73,9 @@ function showShortcuts() {
     title: 'Keyboard and mouse shortcuts', narrow: true,
     body: h('div', { class: 'keylist' },
       h('h4', { text: 'Playing' }), row(['Space'], 'Play or pause'), row(['←'], 'Back one frame'), row(['→'], 'Forward one frame'), row(['Shift', '←'], 'Back one second'), row(['Shift', '→'], 'Forward one second'),
-      h('h4', { text: 'Markers' }), row(['M'], 'Add a marker (1 second)'), row(['I'], 'Set the in point'), row(['O'], 'Set the out point, then M uses both'), row([MOD, 'Z'], 'Undo'), row([MOD, 'Shift', 'Z'], 'Redo'), row(['Delete'], 'Remove the box you clicked'),
+      h('h4', { text: 'Markers' }), row(['M'], 'Add a marker (1 second)'), row(['I'], 'Set the in point'), row(['O'], 'Set the out point, then M uses both'), row([MOD, 'Z'], 'Undo'), row([MOD, 'Shift', 'Z'], 'Redo'), row(['Delete'], 'Remove the box you clicked, or else the selected marker'),
       h('h4', { text: 'Timeline' }), row(['+'], 'Zoom in'), row(['-'], 'Zoom out'), row(['0'], 'Show the whole video'), row([MOD, 'wheel'], 'Zoom at the mouse'), row(['Shift', 'wheel'], 'Move along the timeline'),
+      h('h4', { text: 'Zoom the picture' }), row(['wheel'], 'Zoom in or out on the video, at the mouse'), row(['drag'], 'Move a zoomed picture (when no marker is picked)'), row(['Shift', 'drag'], 'Move a zoomed picture, even with a marker picked'),
       h('h4', { text: 'With the mouse' }), row(['click'], 'Jump to that moment'), row(['drag on a track'], 'Mark a new range'), row(['drag a clip'], 'Move it'), row(['drag a clip end'], 'Resize it'), row(['drag on the video'], 'Draw a box'), row(['?'], 'Show this list')),
     footer: h('button', { class: 'btn primary', onclick: closeModal }, 'Done')
   });
@@ -122,8 +123,8 @@ function boot() {
     if (j < 0) return;
     e.preventDefault(); e.stopPropagation(); tabEls[j].focus(); showTab(tabEls[j].dataset.tab);
   }));
-  $('btnOpen').addEventListener('click', () => $('fileVideo').click());
-  $('btnOpen2').addEventListener('click', () => $('fileVideo').click());
+  $('btnOpen').addEventListener('click', openVideoPicker);
+  $('btnOpen2').addEventListener('click', openVideoPicker);
   $('btnFile').addEventListener('click', openFileMenu);
   $('btnCopy').addEventListener('click', copyMarkdown);
   $('btnExport').addEventListener('click', exportForClaude);

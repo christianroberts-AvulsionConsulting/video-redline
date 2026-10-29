@@ -44,7 +44,9 @@ function rectFrom(ax, ay, bx, by) {
 }
 let bdrag = null;
 overlay.addEventListener('pointerdown', e => {
-  if (!meta || e.button !== 0) return;
+  if (!meta) return;
+  if (startPan(e)) return;                         // a zoomed picture is being moved, not drawn on (see 02-video.js)
+  if (e.button !== 0) return;
   flushEdits();
   const p = vpt(e), boxEl = e.target.closest('.box');
   if (boxEl) {

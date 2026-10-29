@@ -1,7 +1,7 @@
 /* =====================================================================
    06 - Visuals and styles
    A "visual" is a kind (list, diagram, callout...) + a style (an Open Design design system) + its text.
-   Markers of type visual / list / diagram / callout / lower-third carry one. Saved visuals live in the
+   Markers of type visual / list / diagram carry one. Saved visuals live in the
    Visuals tab; styles live in the Styles tab (150 built in, more can be imported from Open Design).
    ===================================================================== */
 const ODSTYLES = (() => { const el = $('od-styles'); if (!el) return []; try { return JSON.parse(el.textContent); } catch (e) { return []; } })();
@@ -37,11 +37,15 @@ function defaultVisual(type) {
   v.style = defaultStyleId(); v.textBy = 'ai';
   return v;
 }
+// A visual can carry a note for the AI editor (movement, a 3D look, anything the picture cannot show). Using the visual from the library puts it into the marker's Comment.
+const NOTE_MAX = 600;
 function normVisual(v) {
   if (!HAS_VIS || !v || typeof v !== 'object') return null;
   const n = VIS.normalize(v);
   n.style = (typeof v.style === 'string' && v.style) ? v.style : defaultStyleId();
   n.textBy = (v.textBy === 'ai' || v.textBy === 'me') ? v.textBy : (hasText(n) ? 'me' : 'ai');      // older files with typed words keep them
+  const note = typeof v.note === 'string' ? v.note.replace(/\r\n?/g, '\n').trim().slice(0, NOTE_MAX) : '';
+  if (note) n.note = note;
   return n;
 }
 // Library items saved before textBy existed (and the starter set of an older build) get theirs once, here, so the editor, the preview and the export agree.
@@ -144,6 +148,22 @@ function openStylePicker(anchor, currentId, onPick) {
   setTimeout(() => search.focus(), 0);
   const cur = list.querySelector('.picker-item.on'); if (cur) revealIn(list, cur);
 }
+/* ---------- kind picker (shows only the current kind; the others open in a popover) ---------- */
+function openKindPicker(anchor, currentId, onPick) {
+  const list = h('div', { class: 'picker-list' });
+  const box = h('div', { class: 'picker' }, list);
+  VIS.KINDS.forEach(k => list.appendChild(h('button', { class: 'picker-item' + (k.id === currentId ? ' on' : ''), type: 'button', onclick: () => { closePopover(); onPick(k.id); } },
+    icon(KIND_ICON[k.id] || 'sparkles'), h('span', { class: 'nm' }, h('b', { text: k.label }), h('small', { text: k.blurb })))));
+  openPopover(anchor, box);
+  const cur = list.querySelector('.picker-item.on'); if (cur) revealIn(list, cur);
+}
+function kindButton(v, onChange) {
+  const kd = kindById(v.kind);
+  const b = h('button', { class: 'stylebtn', type: 'button', title: 'Choose a kind of visual' }, icon(KIND_ICON[v.kind] || 'sparkles'),
+    h('span', { class: 'nm' }, h('b', { text: kd ? kd.label : v.kind })), icon('chevron-down'));
+  b.addEventListener('click', () => openKindPicker(b, v.kind, id => { v.kind = id; onChange(v, { final: true, structural: true }); }));
+  return b;
+}
 function styleButton(v, onChange) {
   const st = styleById(v.style) || fallbackStyle();
   const b = h('button', { class: 'stylebtn', type: 'button', title: 'Choose a style' }, swatchEl(st),
@@ -164,10 +184,8 @@ function buildVisualEditor(v, onChange, o) {
   function draw() {
     root.textContent = '';
     const kd = kindById(v.kind), ai = isAiText(v);
-    const kinds = h('div', { class: 'kindgrid' }, VIS.KINDS.map(k => h('button', { class: 'kbtn' + (v.kind === k.id ? ' on' : ''), type: 'button', title: k.blurb,
-      onclick: () => { v.kind = k.id; fire({ final: true, structural: true }); } }, icon(KIND_ICON[k.id] || 'sparkles'), k.label)));
-    // a div, not a label: a label would pass a click on its caption or the gaps between the buttons to the first kind button
-    root.appendChild(h('div', { class: 'field', role: 'group', 'aria-label': 'What kind of visual?' }, h('span', { text: 'What kind of visual?' }), kinds, kd ? h('span', { class: 'hint', text: kd.blurb }) : null));
+    // a div, not a label: a label would pass a click on its caption to the button
+    root.appendChild(h('div', { class: 'field', role: 'group', 'aria-label': 'What kind of visual?' }, h('span', { text: 'What kind of visual?' }), kindButton(v, onChange), kd ? h('span', { class: 'hint', text: kd.blurb }) : null));
     root.appendChild(h('label', { class: 'field', style: 'margin-top:12px' }, 'Style (optional)', styleButton(v, onChange)));
 
     // who writes the words (two toggle buttons: Space and the arrow keys drive the video everywhere in this app, so these are not real radios)
@@ -275,10 +293,19 @@ function suggestName(v) {
 function applyLibraryVisual(item, m) {
   m = m || byId(selId);
   if (!m) { toast('Select a marker first, then use a visual.'); return; }
-  if (!isVisualType(m.type)) { const k = kindById(item.visual.kind); m.type = (k && k.suits && k.suits[0]) || 'visual'; }
+  if (!isVisualType(m.type)) { const k = kindById(item.visual.kind); m.type = (k && k.suits && k.suits.find(isVisualType)) || 'visual'; }
+  const oldNote = m.visual && m.visual.note;
   m.visual = freshVisual(item.visual);
+  swapNote(m, oldNote, m.visual.note);
   commit(); changed();
-  toast('Applied “' + item.name + '” to marker #' + (sorted().indexOf(m) + 1) + '.');
+  toast('Applied “' + item.name + '” to marker #' + (sorted().indexOf(m) + 1) + '.' + (m.visual.note ? ' Its note was added to the Comment.' : ''));
+}
+// Puts a visual's note into the marker's Comment (once). The note of the visual it replaces comes out again, but only while it is still there word for word.
+function swapNote(m, oldNote, newNote) {
+  let c = m.comment || '';
+  if (oldNote && oldNote !== newNote && c.indexOf(oldNote) >= 0) c = c.replace(oldNote, '').replace(/\n{3,}/g, '\n\n').trim();
+  if (newNote && c.indexOf(newNote) < 0) c = c.trim() ? c.replace(/\s+$/, '') + '\n' + newNote : newNote;
+  m.comment = c;
 }
 function openLibraryPicker(anchor, m) {
   const box = h('div', { class: 'picker' }, h('div', { class: 'picker-top' }, h('b', { text: 'Your saved visuals' })), h('div', { class: 'picker-list' }));
@@ -295,14 +322,20 @@ function openDesigner(o) {
   const nameInp = o.withName ? h('input', { type: 'text', value: o.name || '', placeholder: 'Name, e.g. Shortcut keys, warm', 'aria-label': 'Name' }) : null;
   const thumb = stageThumb(() => v, () => o.box || null);
   const editor = buildVisualEditor(v, (vv, info) => { thumb.update(); if (info.structural) editor.redraw(); }, { open: true });
-  const side = h('div', { class: 'designer-side' }, nameInp ? h('label', { class: 'field' }, 'Name', nameInp) : null, editor);
+  // the note is for the library only: a visual already on a marker has had its note put into the Comment, which is where it is edited from then on
+  const noteInp = o.withName ? h('textarea', { rows: 3, maxlength: NOTE_MAX, 'aria-label': 'Note for the AI', placeholder: 'For example: Turn the number slowly around its vertical axis in 3D, like a rotating sign.' }) : null;
+  if (noteInp) { noteInp.value = v.note || ''; noteInp.addEventListener('input', () => { v.note = noteInp.value; }); }
+  const noteField = noteInp ? h('label', { class: 'field', style: 'margin-top:12px' }, 'Note for the AI (optional)', noteInp,
+    h('span', { class: 'hint', text: 'Added to the marker’s Comment each time you press Use, so you do not have to write it again. Good for things the picture cannot show, such as a 3D spin or a slow fade.' })) : null;
+  const done = () => normVisual(v) || v;
+  const side = h('div', { class: 'designer-side' }, nameInp ? h('label', { class: 'field' }, 'Name', nameInp) : null, editor, noteField);
   const left = h('div', {}, thumb.el, h('div', { class: 'hint', style: 'margin-top:10px', text: frameBackdrop() ? 'Shown on top of the frame the video is paused on.' : 'Open a video to see the visual on top of a real frame.' }));
   const modal = openModal({
     title: o.title || 'Visual designer',
     body: h('div', { class: 'designer' }, left, side),
     footer: [h('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
-      o.secondaryLabel ? h('button', { class: 'btn', onclick: () => { o.onSecondary(v, nameInp ? nameInp.value : ''); closeModal(); } }, o.secondaryLabel) : null,
-      h('button', { class: 'btn primary', onclick: () => { o.onApply(v, nameInp ? nameInp.value : ''); closeModal(); } }, o.applyLabel || 'Save')]
+      o.secondaryLabel ? h('button', { class: 'btn', onclick: () => { o.onSecondary(done(), nameInp ? nameInp.value : ''); closeModal(); } }, o.secondaryLabel) : null,
+      h('button', { class: 'btn primary', onclick: () => { o.onApply(done(), nameInp ? nameInp.value : ''); closeModal(); } }, o.applyLabel || 'Save')]
   });
   mountIcons(modal.box);
   flushInsert();
@@ -327,14 +360,14 @@ function seedLibrary() {
 function visualRow(it) {
   const thumb = stageThumb(() => it.visual, null, { backdrop: false });
   const st = styleById(it.visual.style);
-  const sub = (isAiText(it.visual) ? 'AI text · ' : '') + kindLabel(it.visual.kind) + (st ? ' · ' + st.name : '');      // the AI flag comes first: it is the part that must not be cut off
+  const sub = (isAiText(it.visual) ? 'AI text · ' : '') + (it.visual.note ? 'Note · ' : '') + kindLabel(it.visual.kind) + (st ? ' · ' + st.name : '');      // the AI flag comes first: it is the part that must not be cut off
   return h('div', { class: 'vrow', 'data-id': it.id },
     thumb.el,
     h('div', { class: 'info' },
       h('b', { text: it.name, title: it.name }),
       h('small', { text: sub, title: sub + (isAiText(it.visual) ? ' (the assistant writes the words from the marker comment)' : '') }),
       h('div', { class: 'acts' },
-        h('button', { class: 'btn sm primary', title: 'Use on the selected marker', onclick: () => applyLibraryVisual(it) }, 'Use'),
+        h('button', { class: 'btn sm primary', title: 'Use on the selected marker' + (it.visual.note ? ' (its note is added to the Comment: ' + it.visual.note + ')' : ''), onclick: () => applyLibraryVisual(it) }, 'Use'),
         h('button', { class: 'btn icon sm', title: 'Edit this visual', 'aria-label': 'Edit', onclick: () => editLibraryVisual(it) }, icon('settings')),
         h('button', { class: 'btn icon sm', title: 'Make a copy', 'aria-label': 'Duplicate', onclick: () => duplicateLibraryVisual(it) }, icon('duplicate')),
         h('button', { class: 'btn icon sm danger', title: 'Delete from the library', 'aria-label': 'Delete', onclick: () => deleteLibraryVisual(it) }, icon('trash')))));
@@ -357,6 +390,8 @@ function newLibraryVisual() {
   openDesigner({ title: 'New visual', visual: base, name: '', withName: true, applyLabel: 'Save to library',
     onApply: (nv, name) => { lib.visuals.unshift({ id: uid(), name: (name || '').trim() || suggestName(nv), visual: nv, created: Date.now() }); saveLib(); renderVisualsPane(); } });
 }
+// The Make with AI button, shared by the Visuals and Styles tabs (both open the same window; its result always goes to the Visuals tab)
+const makeWithAiRow = () => HAS_VIS ? h('div', { class: 'row' }, h('button', { class: 'btn sm', style: 'flex:1 1 auto', title: 'Copy a prompt that lets any AI assistant write visuals for your library', onclick: openMakeWithAi }, icon('sparkles'), 'Make with AI')) : null;
 let visQuery = '';
 function renderVisualsPane(keepScroll) {       // keepScroll: Duplicate, Delete and Edit leave the list where it was (New puts its item at the top, so it starts from the top)
   const pane = $('paneVisuals'), prev = keepScroll && pane.querySelector('.pane-body'), top = prev ? prev.scrollTop : 0;
@@ -368,7 +403,8 @@ function renderVisualsPane(keepScroll) {       // keepScroll: Duplicate, Delete 
     h('div', { class: 'row' }, h('button', { class: 'btn primary sm', title: 'Design a new visual', onclick: newLibraryVisual }, icon('plus'), 'New'),
       search,
       h('button', { class: 'btn icon sm ghost', title: 'Save your library to a file', 'aria-label': 'Save library', onclick: exportLibrary }, icon('download')),
-      h('button', { class: 'btn icon sm ghost', title: 'Load a library file', 'aria-label': 'Load library', onclick: () => $('fileLib').click() }, icon('upload')))));
+      h('button', { class: 'btn icon sm ghost', title: 'Load a library file', 'aria-label': 'Load library', onclick: () => $('fileLib').click() }, icon('upload'))),
+    makeWithAiRow()));
   const body = h('div', { class: 'pane-body' });
   pane.appendChild(body);
   function drawGrid() {
@@ -386,14 +422,21 @@ function exportLibrary() {
   download('video-redline-library.json', JSON.stringify({ tool: 'video-review-library', version: 1, visuals: lib.visuals, styles: lib.styles, starred: lib.starred, defStyle: lib.defStyle }, null, 2), 'application/json');
   toast('Library saved to your Downloads folder.');
 }
-async function importLibraryFile(file) {
-  let d; try { d = JSON.parse(await readFile(file)); } catch (e) { toast('That is not a library file.'); return; }
-  if (!d || !Array.isArray(d.visuals)) { toast('That is not a library file.'); return; }
+// Adds what a library file holds (already parsed) to the library: how many visuals it added, or -1 when it is not a library file. Used by Load and by the paste box of Make with AI.
+function addLibraryData(d) {
+  if (!d || !Array.isArray(d.visuals)) return -1;
   if (Array.isArray(d.styles)) importStyleRecords(d.styles);
   let n = 0;
-  d.visuals.forEach(it => { const nv = normVisual(it.visual); if (nv) { lib.visuals.push({ id: uid(), name: String(it.name || 'Imported visual'), visual: nv, created: Date.now() }); n++; } });
+  d.visuals.forEach(it => { const nv = it && normVisual(it.visual); if (nv) { lib.visuals.push({ id: uid(), name: String(it.name || 'Imported visual'), visual: nv, created: Date.now() }); n++; } });
   (d.starred || []).forEach(id => { if (lib.starred.indexOf(id) < 0) lib.starred.push(id); });
-  saveLib(); renderVisualsPane(); toast('Added ' + n + ' visual' + (n === 1 ? '' : 's') + ' to your library.');
+  saveLib(); renderVisualsPane();
+  return n;
+}
+async function importLibraryFile(file) {
+  let d; try { d = JSON.parse(await readFile(file)); } catch (e) { toast('That is not a library file.'); return; }
+  const n = addLibraryData(d);
+  if (n < 0) { toast('That is not a library file.'); return; }
+  toast('Added ' + n + ' visual' + (n === 1 ? '' : 's') + ' to your library.');
 }
 $('fileLib').addEventListener('change', () => { const f = $('fileLib').files[0]; if (f) importLibraryFile(f); $('fileLib').value = ''; });
 
@@ -439,7 +482,8 @@ function renderStylesPane() {
     onclick: () => { styleFiltersOpen = !styleFiltersOpen; filterRow.hidden = !styleFiltersOpen; filterBtn.setAttribute('aria-expanded', String(styleFiltersOpen)); } }, 'Filter', icon('chevron-down'));
   pane.appendChild(h('div', { class: 'lib-head' }, h('div', { class: 'row' }, search, filterBtn,
     h('button', { class: 'btn icon sm', title: 'Add a design system from Open Design (its DESIGN.md and tokens.css files)', 'aria-label': 'Import a design system', onclick: () => $('fileStyle').click() }, icon('import'))),
-    filterRow));
+    filterRow,
+    makeWithAiRow()));
   const body = h('div', { class: 'pane-body' }); pane.appendChild(body);
   body.addEventListener('scroll', () => { if (!styleScrollTimer) styleScrollTimer = setTimeout(() => { styleScrollTimer = null; styleRenderVisible(body); }, 60); });
   function drawGrid() {
