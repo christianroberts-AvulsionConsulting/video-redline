@@ -80,15 +80,7 @@ function showShortcuts() {
   });
 }
 
-/* ---------- File menu ---------- */
-function openFileMenu() {
-  const item = (ic, label, fn) => h('button', { onclick: () => { closePopover(); fn(); } }, icon(ic), label);
-  const menu = h('div', { class: 'menu', role: 'menu' },
-    item('folder-open', 'Open video…', () => $('fileVideo').click()), h('hr'),
-    item('save', 'Save session (JSON)', saveSession), item('upload', 'Load session…', () => $('fileSession').click()), h('hr'),
-    item('import', 'Import Camtasia markers…', () => $('fileCam').click()));
-  openPopover($('btnFile'), menu);
-}
+/* ---------- File menu: see openFileMenu in 07-sessions.js ---------- */
 
 /* ---------- panels and tabs ---------- */
 function narrow() { return window.innerWidth <= 980; }

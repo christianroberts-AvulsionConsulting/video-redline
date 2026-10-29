@@ -334,6 +334,31 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 .menu button:hover { background: var(--raise); }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 0; }
 .menu .ic { color: var(--text-2); }
+/* File menu: the saved sessions (07-sessions.js). A row opens the session; the small buttons at its side rename, copy or delete it. */
+.sess-menu { width: 360px; max-width: calc(100vw - 16px); }
+.menu .sess-head { display: flex; align-items: center; gap: 8px; padding: 6px 4px 4px 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); }
+.sess-head .grow { flex: 1; }
+.menu .sess-head button { width: auto; max-width: 150px; padding: 2px 8px; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-head button .ic { width: 14px; height: 14px; flex: none; }
+.sess-note { padding: 4px 10px 8px; color: var(--text-3); font-size: 12px; line-height: 1.45; }
+.sess-list { max-height: min(300px, 38vh); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #4a505c transparent; }
+.sess-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; }
+.sess-row:hover, .sess-row:focus-within { background: var(--raise); }
+.sess-row.cur { box-shadow: inset 2px 0 0 var(--accent); }
+.menu .sess-main { flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 4px 6px 10px; }
+.menu .sess-main:hover { background: transparent; }
+.sess-nm { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-row.cur .sess-nm { font-weight: 600; }
+.sess-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11.5px; }
+.sess-tag { color: var(--accent); }
+.sess-acts { display: flex; flex: none; gap: 1px; padding-right: 3px; }
+.menu .sess-acts button { width: 28px; height: 28px; padding: 0; justify-content: center; flex: none; color: var(--text-3); }
+.menu .sess-acts button .ic { color: inherit; width: 16px; height: 16px; }
+.menu .sess-acts button:hover { background: var(--panel-3); color: var(--text); }
+.menu .sess-acts button.danger:hover { color: var(--danger); }
+.sess-rename { flex: 1; min-width: 0; margin: 4px 3px 4px 6px; }
+.sess-setup p { margin: 0 0 10px; line-height: 1.5; }
+.sess-setup code { word-break: break-all; user-select: all; }
 .picker { position: fixed; z-index: 80; width: 360px; max-height: min(520px, 70vh); display: flex; flex-direction: column; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 12px; box-shadow: 0 16px 50px rgba(0, 0, 0, .65); overflow: hidden; }
 .picker-top { padding: 10px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
 .picker-top input { width: 100%; }

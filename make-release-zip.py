@@ -33,6 +33,7 @@ TOP_FILES = [
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
     "src/vendor/NOTICE-open-design.txt",     # the Apache-2.0 notice of the style presets (a copy is also inside the page)
+    "sessions/README.txt",                   # makes the empty "sessions" folder exist after the download (File, Save session keeps its files there)
 ]
 TOOLS_DIR = "tools"
 
@@ -49,7 +50,7 @@ EXEC_SUFFIXES = (".command", ".sh")
 FORBIDDEN_SUFFIXES = (".onnx", ".bin", ".dll", ".exe", ".pyd", ".so", ".dylib", ".whl", ".mp4", ".mov", ".wav", ".mp3")
 MAX_FILE_BYTES = 3 * 1024 * 1024
 MAX_TOTAL_BYTES = 6 * 1024 * 1024
-MUST_HAVE = ["video-redline.html", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md", "src/vendor/NOTICE-open-design.txt",
+MUST_HAVE = ["video-redline.html", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md", "src/vendor/NOTICE-open-design.txt", "sessions/README.txt",
              "tools/setup-windows.bat", "tools/setup-autostart-windows.bat", "tools/add-desktop-icon-windows.bat",
              "tools/stop-helper-windows.bat", "tools/remove-autostart-windows.bat", "tools/start-helper-windows.bat",
              "tools/helper_launcher.pyw", "tools/open_video_review.pyw", "tools/vrt_server.py", "tools/transcribe.py",

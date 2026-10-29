@@ -120,10 +120,10 @@ function copyMarkdown() {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Markdown copied. Paste it to Claude.'), fallback);
   else fallback();
 }
-function saveSession() {
+function saveSessionFile() {                           // File, Download session file (File, Save session is in 07-sessions.js: it saves into the sessions folder)
   if (needVideo()) return;
   download(baseName() + '-session.json', JSON.stringify(buildJson({ keepHidden: true }), null, 2), 'application/json');
-  toast('Session saved to your Downloads folder.');
+  toast('Session file saved to your Downloads folder.');
 }
 
 // Turn saved / imported marker data into clean markers that fit this video. `from` = the file's video info (or null).
@@ -154,19 +154,27 @@ function cleanMarkers(arr, from) {
 }
 function readFile(file) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); }); }
 async function loadSessionFile(file) {
-  if (needVideo()) return;
-  let text, data;
-  try { text = await readFile(file); data = JSON.parse(text); } catch (e) { toast('That file is not a saved session.'); return; }
+  if (needVideo()) return false;
+  let text;
+  try { text = await readFile(file); } catch (e) { toast('That file is not a saved session.'); return false; }
+  return loadSessionText(text, file.name);
+}
+// `text` is a saved session (from a file picker, a drop, or the sessions folder); `fileName` is only for a transcript that was opened here by mistake. Returns true when the session was loaded.
+async function loadSessionText(text, fileName) {
+  if (needVideo()) return false;
+  let data;
+  try { data = JSON.parse(text); } catch (e) { toast('That file is not a saved session.'); return false; }
   if (!data || !Array.isArray(data.markers)) {
-    if (!(looksLikeTranscript(text) && cleanupOpenTranscript(text, file.name))) toast('That file is not a saved session.');      // a transcript file belongs in the Cleanup tab
-    return;
+    if (!(looksLikeTranscript(text) && cleanupOpenTranscript(text, fileName))) toast('That file is not a saved session.');      // a transcript file belongs in the Cleanup tab
+    return false;
   }
   const v = data.video || {};
-  if (v.name && v.name !== meta.name && !confirm('This session was made for “' + v.name + '”, but “' + meta.name + '” is open. Load it anyway?')) return;
-  if (markers.length && !confirm('Replace the ' + markers.length + ' marker(s) you have now?')) return;
+  if (v.name && v.name !== meta.name && !confirm('This session was made for “' + v.name + '”, but “' + meta.name + '” is open. Load it anyway?')) return false;
+  if (markers.length && !confirm('Replace the ' + markers.length + ' marker(s) you have now?')) return false;
   if (v.fps >= 1 && v.fps <= 240) fps = normFps(+v.fps);
   if (Array.isArray(data.styles)) importStyleRecords(data.styles);
   markers = cleanMarkers(data.markers, v);
+  sessForget();                                     // these markers are no longer the work of the session File, Save session updates (07-sessions.js sets it again for a session opened from the folder)
   selId = selBox = inF = outF = null;
   const f = $('fps'); if (f) f.value = fmtFps(fps);
   const loaded = markers.length;
@@ -180,6 +188,7 @@ async function loadSessionFile(file) {
   const said = panelSaid; panelSaid = '';            // what the panel told the user while doing that (for example "...leave out 1 cut ... listed under Rejected"): our toast must not paint over it
   const n = markers.length;
   toast('Loaded ' + loaded + ' marker' + (loaded === 1 ? '' : 's') + '.' + (n < loaded ? ' The Cleanup tab took out ' + (loaded - n) + ' automatic cut' + (loaded - n === 1 ? '' : 's') + ' that do not belong to the transcript it has open.' : '') + (said ? ' ' + said : ''), (n < loaded || said) ? 7000 : undefined);
+  return true;
 }
 // Camtasia web export: media/xmpFile.xml lists markers under xmpDM:markers (name + startTime in milliseconds).
 async function loadCamtasiaFile(file) {

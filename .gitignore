@@ -9,6 +9,9 @@ tools/tmp/
 # Transcripts made next to videos
 *-transcript.json
 
+# Sessions people save from the File menu (the folder itself ships, with its README.txt)
+sessions/*.json
+
 # OS and editor leftovers
 .DS_Store
 Thumbs.db

@@ -9,10 +9,14 @@ This page is for people who build or publish Video Redline. If you only want to 
 ```
 src/shell.html      page structure
 src/styles.css      the look
-src/js/             the app, in the order it is joined
+src/js/             the app, in the order it is joined (07-sessions.js is the File menu and the saved
+                    sessions list: it reads and writes the sessions/ folder through the browser's own
+                    folder picker, never through the helper)
 src/vendor/         visuals.js (visual templates), od-parse.js (Open Design reader),
                     od-styles.json (the bundled styles), cleanup.js, transcriber-client.js and
                     cleanup-panel.js (audio cleanup), icons.html, NOTICE-open-design.txt
+sessions/           the folder File, Save session keeps its .json files in; only README.txt is in git and in
+                    the ZIP (.gitignore leaves the people's sessions out), so the folder exists after a download
 build.js            joins everything into video-redline.html
 make-release-zip.py makes the download ZIP (see Publishing below); it is not part of the ZIP
 tools/              the optional transcription helper (Python sources, set-up and start scripts,
@@ -36,7 +40,7 @@ The `.command` files in `tools/` lose their executable bit in a ZIP download, wh
 
 To change the version number: edit `VERSION`, the line `Version ...` near the top of `README.md` and of `tools/README.md`, and the test in `tools/tests/test_folders_and_origins.py` that pins the second one; then run `node build.js` (the number is stamped into the footer of the page).
 
-Build the release ZIP from the repository, never from a folder on which the set-up has been run. A set-up folder holds FFmpeg with the GPL programs x264 and x265, files from Intel and NVIDIA, and about 1.3 GB of speech models that need credit (see `THIRD-PARTY-NOTICES.md`, sections 2 and 3). The script `make-release-zip.py` does it: `python make-release-zip.py` writes `dist/video-redline-<VERSION>.zip` (the page, `tools`, `README.md`, `LICENSE`, `THIRD-PARTY-NOTICES.md` and the Open Design notice, no folder around them), puts the right line endings and the executable mark on the Mac scripts, and refuses to finish when a rule below is broken. `python make-release-zip.py --check <zip>` checks a ZIP that you downloaded.
+Build the release ZIP from the repository, never from a folder on which the set-up has been run. A set-up folder holds FFmpeg with the GPL programs x264 and x265, files from Intel and NVIDIA, and about 1.3 GB of speech models that need credit (see `THIRD-PARTY-NOTICES.md`, sections 2 and 3). The script `make-release-zip.py` does it: `python make-release-zip.py` writes `dist/video-redline-<VERSION>.zip` (the page, `tools`, `sessions/README.txt`, `README.md`, `LICENSE`, `THIRD-PARTY-NOTICES.md` and the Open Design notice, no folder around them), puts the right line endings and the executable mark on the Mac scripts, and refuses to finish when a rule below is broken. `python make-release-zip.py --check <zip>` checks a ZIP that you downloaded.
 
 Before you announce a release, run `node build.js --check` (it says whether `video-redline.html` is up to date with `src/`; `make-release-zip.py` runs it for you when Node is installed), then open the ZIP and check (the script already does the first four):
 
