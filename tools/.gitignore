@@ -13,3 +13,5 @@ __pycache__/
 *-transcript.json
 # The icon pictures that add-desktop-icon-windows.bat writes into this folder (video-redline.ico; older runs left video-review.ico).
 *.ico
+# What "Teach it your ums" learned from this person's own recordings and choices (fingerprints only, no audio).
+teach/

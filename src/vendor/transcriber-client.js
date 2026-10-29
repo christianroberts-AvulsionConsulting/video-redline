@@ -48,7 +48,18 @@
  *                                      the ones above. A failed job whose reason is the plain word 'failed' keeps the helper's own message on
  *                                      err.message, and err.help is then only what to do next.)
  *
- *   options    (all optional): { parakeet: 'v2'|'v3', whisper: 'small.en'|..., noWhisper: bool, noParakeet: bool, threads: int }
+ *   options    (all optional): { parakeet: 'v2'|'v3', whisper: 'small.en'|..., noWhisper: bool, noParakeet: bool, threads: int,
+ *              teach: 'um'|'notum' }   (teach: the file is a recording of ums (or of sounds that are NOT ums) for the helper to learn
+ *              from, not a video to transcribe; run() then resolves with { format:'video-redline-teach', found, used, ignored, summary })
+ *
+ *   "Teach it your ums" (what the helper learned from the person's own ums; the same helper, the same port as run()):
+ *   tc.teachStatus()                -> Promise<summary>   { ready, kind, ums, notums, clips:[{id,name,label,sounds,ignored}],
+ *                                      decisions:{ums,notums}, check, trained, needs }
+ *   tc.teachModel()                 -> Promise<model|null>   the trained model (null until there are enough ums)
+ *   tc.teachExamples(videoKey, examples) -> Promise<summary>   examples: [{ label:'um'|'notum', fp:[numbers] }]; replaces what the
+ *                                      Accept / Reject choices of that one video taught the helper
+ *   tc.teachForget(what)            -> Promise<summary>   what: 'all' | 'clips' | 'decisions'
+ *   These reject with an Error { code, message, help } like run(); code 'failed' with message about "too old" means an older helper.
  *   onProgress({ phase: 'checking'|'uploading'|'transcribing'|'finishing', percent: 0..100 (whole operation: the upload
  *              counts for 15, transcribing for 80, finishing for 5; never goes backwards), message, etaSeconds|null })
  *              While a job runs and the helper does not answer, the message becomes "Lost contact with the helper, trying
@@ -77,14 +88,14 @@
 }(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function (root) {
   'use strict';
 
-  var VERSION = '1.0.4';
+  var VERSION = '1.1.0';
   var HELPER_ID = 'video-review-helper';
   var DEFAULT_PORTS = [47831, 47832, 47833, 47834, 47835];
   var UPLOAD_SHARE = 15;        /* percent of the whole operation */
   var WORK_SHARE = 80;
   var FINISH_SHARE = 5;
   var DEFAULT_MAX_BYTES = 6 * 1024 * 1024 * 1024;
-  var ALLOWED_OPTIONS = ['parakeet', 'whisper', 'noWhisper', 'noParakeet', 'threads'];
+  var ALLOWED_OPTIONS = ['parakeet', 'whisper', 'noWhisper', 'noParakeet', 'threads', 'teach'];
 
   /* What to do after a job failed inside the helper without a cause of its own (the helper's message says what went wrong). */
   var FAILED_NEXT = 'Try once more. If it keeps failing, try a shorter recording, or send the text in the helper window (or, if the helper has no window, the files in the logs folder of the tools folder) to the person who invited you to the beta.';
@@ -606,7 +617,34 @@
       return sendCancel(ctx.port, ctx.jobId).then(function () { return true; });
     }
 
-    return { check: check, run: run, cancel: cancel };
+    /* ---- "Teach it your ums": small JSON calls to the helper that run() found ------------------------- */
+    function teachCall(method, path, bodyObj, ms) {
+      return Promise.resolve().then(function () {
+        return lastPort ? lastPort : checkNow(null).then(function (st) { return st && st.found ? st.port : null; });
+      }).then(function (port) {
+        if (!port) { throw makeError('no-helper'); }
+        var init = { method: method };
+        if (bodyObj !== undefined) {
+          init.headers = { 'Content-Type': 'application/json' };
+          init.body = JSON.stringify(bodyObj);
+        }
+        return http(base(port) + path, init, ms || 30000).then(function (r) {
+          var d = tryJson(r.text);
+          if (r.status === 200 && d && typeof d === 'object') { return d; }
+          if (r.status === 404) { throw makeError('failed', 'This helper is too old to learn your ums. Update Video Redline and start the helper again.'); }
+          throw errorFromResponse(r.status, d, 'teach');
+        }, function () {
+          lastPort = null;
+          throw makeError('network');
+        });
+      });
+    }
+    function teachStatus() { return teachCall('GET', '/teach'); }
+    function teachModel() { return teachCall('GET', '/teach/model').then(function (d) { return d && d.model && typeof d.model === 'object' ? d.model : null; }); }
+    function teachExamples(videoKey, examples) { return teachCall('POST', '/teach/examples', { video: String(videoKey || ''), examples: examples || [] }, 60000); }
+    function teachForget(what) { return teachCall('POST', '/teach/forget', { what: what }, 60000); }
+
+    return { check: check, run: run, cancel: cancel, teachStatus: teachStatus, teachModel: teachModel, teachExamples: teachExamples, teachForget: teachForget };
   }
 
   return {

@@ -38,7 +38,7 @@ TOP_FILES = [
 TOOLS_DIR = "tools"
 
 # Under tools/: folders and files that are never handed out.
-SKIP_DIRS = {"python", "venv", "uv", "uv-cache", "hf-cache", "tmp", "dev", "logs", "__pycache__", "tests", ".git"}
+SKIP_DIRS = {"python", "venv", "uv", "uv-cache", "hf-cache", "tmp", "dev", "logs", "teach", "__pycache__", "tests", ".git"}
 SKIP_NAMES = {".gitignore", ".gitattributes", ".DS_Store", "Thumbs.db"}
 SKIP_SUFFIXES = (".pyc", ".ico", ".log", "-transcript.json")
 
@@ -110,7 +110,7 @@ def check_entries(entries):
         if low.endswith(FORBIDDEN_SUFFIXES):
             die("%s must not be in the ZIP (a program, a model or a media file)" % name)
         for part in name.split("/")[:-1]:
-            if part in ("venv", "python", "uv", "uv-cache", "hf-cache", "tmp", "dev", "logs", "__pycache__", "tests", ".git"):
+            if part in ("venv", "python", "uv", "uv-cache", "hf-cache", "tmp", "dev", "logs", "teach", "__pycache__", "tests", ".git"):
                 die("%s is inside a folder (%s) that must not be in the ZIP" % (name, part))
         if len(data) > MAX_FILE_BYTES:
             die("%s is %d bytes: too big for this ZIP" % (name, len(data)))

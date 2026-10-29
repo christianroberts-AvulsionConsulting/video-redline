@@ -5153,6 +5153,34 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
   }
   function logit(p) { p = clamp(p, 0.02, 0.98); return Math.log(p / (1 - p)); }
   function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
+
+  /* "Teach it your ums": how much a sound's fingerprint (46 numbers the helper measures, see tools/vrt_teach.py) looks like the
+     person's own ums, 0 to 1. `model` is what the helper trained (GET /teach/model). null when the model or the fingerprint do not fit.
+     The arithmetic is the same as score() in vrt_teach.py (a test checks that the two agree). */
+  function scoreFingerprint(model, fp) {
+    if (!isObj(model) || !Array.isArray(fp) || !Array.isArray(model.mean) || !Array.isArray(model.std)) return null;
+    var n = fp.length, i;
+    if (n < 1 || model.features !== n || model.mean.length !== n || model.std.length !== n) return null;
+    var z = new Array(n);
+    for (i = 0; i < n; i++) {
+      var v = num(fp[i], NaN), sd = num(model.std[i], NaN), mu = num(model.mean[i], NaN);
+      if (!isFinite(v) || !isFinite(sd) || !isFinite(mu) || sd <= 0) return null;
+      z[i] = clamp((v - mu) / sd, -6, 6);
+    }
+    if (model.kind === 'two-class') {
+      if (!Array.isArray(model.w) || model.w.length !== n) return null;
+      var s = num(model.b, 0);
+      for (i = 0; i < n; i++) s += z[i] * num(model.w[i], 0);
+      return sigmoid(clamp(s, -30, 30));
+    }
+    if (model.kind === 'one-class') {
+      var d2 = 0, edge = num(model.edge, NaN), slope = num(model.slope, NaN);
+      if (!isFinite(edge) || edge <= 0 || !isFinite(slope)) return null;
+      for (i = 0; i < n; i++) d2 += z[i] * z[i];
+      return sigmoid(clamp(-(d2 / n / edge - 1) * slope, -30, 30));
+    }
+    return null;
+  }
   function fmtDur(x) { return String(Math.round(x * 100) / 100); }
   function q(s) { return '\u201C' + s + '\u201D'; }
   function cutLine(a, b) { return 'Cuts ' + formatTime(a) + ' to ' + formatTime(b) + ' (' + fmtDur(b - a) + ' s).'; }
@@ -5354,6 +5382,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     o.includeFillers = bool(p.includeFillers, d.includeFillers);
     o.includeDeadSpace = bool(p.includeDeadSpace, d.includeDeadSpace);
     o.includeFalseStarts = bool(p.includeFalseStarts, d.includeFalseStarts);
+    o.learned = isObj(p.learned) ? p.learned : null;      // the trained "my ums" model (see scoreFingerprint); null = not used
     // only a list (array) or a comma separated string changes the filler list; null, a number, an object or a
     // boolean fall back to the defaults like any other bad value (an explicit [] or '' still means "no fillers")
     o.filler = normaliseFillerList(Array.isArray(p.fillers) || typeof p.fillers === 'string' ? p.fillers : d.fillers);
@@ -5389,6 +5418,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
       T.push({
         i: i, w: text, disp: disp, n: n, key: fillerKey(n), s: s, e: e,
         c: cKnown ? clamp(c, 0, 1) : 0.7, cKnown: cKnown, src: srcOf(w.src),
+        fp: Array.isArray(w.fp) && w.fp.length > 0 && w.fp.length <= 128 ? w.fp : null,   // the helper's fingerprint of an um-like sound
         frag: isFrag, isNum: /[0-9]/.test(n) || isNumberWord(n),
         caps: base.length >= 2 && base.length <= 3 && base === base.toUpperCase() && base !== base.toLowerCase(),
         // punctuation the engine wrote after the word: a full stop, "?" or "!" ends the sentence, so the next word
@@ -5606,6 +5636,18 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     } else if (tok.src === 'whisper') {
       z -= 0.3; // nothing to confirm a Whisper-only word
     }
+    // What the person taught the tool (Teach it your ums). It can only hold a cut back: a sound that looks nothing like their ums
+    // (a sound effect, a pop) loses up to 3 log-odds, and when it looks clearly unlike them it is never applied without asking (both
+    // engines agreeing on a sound effect would otherwise still be sure enough); a sound that looks like an um adds nothing.
+    var mine = null;
+    if (P.learned && tok.fp) {
+      var um = scoreFingerprint(P.learned, tok.fp);
+      if (um !== null) {
+        var lz = clamp(logit(um) * 0.8, -3, 0);
+        if (lz < -0.05) { z += lz; mine = um; }
+        if (um < 0.35) force = true;
+      }
+    }
     var conf = sigmoid(z);
 
     var parts = [];
@@ -5622,15 +5664,20 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
       parts.push(heard + '.');
       if (cls.inferred) parts.push('It is not on your filler list, but it is short and not a normal word, so it looks like an \u201Cum\u201D.');
     }
+    if (mine !== null && mine < 0.5) {
+      parts.push('It does not sound much like the ums you taught the tool (about ' + Math.max(1, Math.round(mine * 100)) + '% like them), so it could be a sound effect or another sound. Please listen first.');
+    }
     if (dur > P.longFiller) {
       conf -= 0.2; force = true;
       parts.push('It lasts ' + fmtDur(dur) + ' s, which is long for a filler (a speech engine can stretch one over a pause), so please listen first.');
     }
     parts.push(CUT_MARK);
-    return {
+    var out = {
       kind: 'filler', start: r[0], end: r[1], text: tok.disp, confidence: conf, force: force,
       src: srcSetOf([tok], audio !== 'unknown'), words: [tok.i], reason: parts.join(' ')
     };
+    if (mine !== null) out.mine = mine;
+    return out;
   }
 
   function detectFillers(ctx, out) {
@@ -6250,6 +6297,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
         status: status, reason: reason, src: k.src, words: k.words
       };
       if (k.partial) cand.partial = true; // optional: only part of the listed word is cut (a joined stutter such as "wh-what")
+      if (typeof k.mine === 'number') cand.mine = k.mine; // optional: how much this sound looked like the person's own ums (see scoreFingerprint)
       cands.push(cand);
       var len = end - start;
       cutSeconds += len;
@@ -6332,6 +6380,13 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     'It can open the transcript file made by the helper script (.json), a Whisper transcript (.json), or a subtitle file (.srt or .vtt).';
 
   // --- generic word list -> canonical, sorted, validated words
+  // a fingerprint is a short list of plain numbers; anything else is dropped
+  function cleanFingerprint(fp) {
+    if (!Array.isArray(fp) || fp.length < 1 || fp.length > 128) return null;
+    var out = new Array(fp.length);
+    for (var i = 0; i < fp.length; i++) { var v = fp[i]; if (typeof v !== 'number' || !isFinite(v)) return null; out[i] = v; }
+    return out;
+  }
   function normaliseWordList(raw, defaultSrc, warnings) {
     var out = [], dropped = 0, fixed = 0;
     for (var i = 0; i < raw.length; i++) {
@@ -6347,7 +6402,10 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
       var c = num(x.c, NaN);
       if (isFinite(c) && c > 1.5 && c <= 100) c = c / 100;
       var src = srcOf(x.src); if (src === 'other') src = defaultSrc;
-      out.push({ w: w, s: s, e: e, c: isFinite(c) ? clamp(c, 0, 1) : null, src: src, _i: i });
+      var rec = { w: w, s: s, e: e, c: isFinite(c) ? clamp(c, 0, 1) : null, src: src, _i: i };
+      var fp = cleanFingerprint(x.fp);
+      if (fp) rec.fp = fp;                          // the helper's fingerprint of an um-like sound (see scoreFingerprint): kept as it is
+      out.push(rec);
     }
     out.sort(function (a, b) { return a.s - b.s || a.e - b.e || a._i - b._i; });
     for (var j = 0; j < out.length; j++) delete out[j]._i;
@@ -6769,6 +6827,7 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
     parseTranscript: parseTranscript,
     validateTranscript: validateTranscript,
     analyze: analyze,
+    scoreFingerprint: scoreFingerprint,
     mergeCuts: mergeCuts,
     wordsInRange: wordsInRange,
     describeKind: describeKind,
@@ -6827,7 +6886,18 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
  *                                      the ones above. A failed job whose reason is the plain word 'failed' keeps the helper's own message on
  *                                      err.message, and err.help is then only what to do next.)
  *
- *   options    (all optional): { parakeet: 'v2'|'v3', whisper: 'small.en'|..., noWhisper: bool, noParakeet: bool, threads: int }
+ *   options    (all optional): { parakeet: 'v2'|'v3', whisper: 'small.en'|..., noWhisper: bool, noParakeet: bool, threads: int,
+ *              teach: 'um'|'notum' }   (teach: the file is a recording of ums (or of sounds that are NOT ums) for the helper to learn
+ *              from, not a video to transcribe; run() then resolves with { format:'video-redline-teach', found, used, ignored, summary })
+ *
+ *   "Teach it your ums" (what the helper learned from the person's own ums; the same helper, the same port as run()):
+ *   tc.teachStatus()                -> Promise<summary>   { ready, kind, ums, notums, clips:[{id,name,label,sounds,ignored}],
+ *                                      decisions:{ums,notums}, check, trained, needs }
+ *   tc.teachModel()                 -> Promise<model|null>   the trained model (null until there are enough ums)
+ *   tc.teachExamples(videoKey, examples) -> Promise<summary>   examples: [{ label:'um'|'notum', fp:[numbers] }]; replaces what the
+ *                                      Accept / Reject choices of that one video taught the helper
+ *   tc.teachForget(what)            -> Promise<summary>   what: 'all' | 'clips' | 'decisions'
+ *   These reject with an Error { code, message, help } like run(); code 'failed' with message about "too old" means an older helper.
  *   onProgress({ phase: 'checking'|'uploading'|'transcribing'|'finishing', percent: 0..100 (whole operation: the upload
  *              counts for 15, transcribing for 80, finishing for 5; never goes backwards), message, etaSeconds|null })
  *              While a job runs and the helper does not answer, the message becomes "Lost contact with the helper, trying
@@ -6856,14 +6926,14 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
 }(typeof self !== 'undefined' ? self : (typeof globalThis !== 'undefined' ? globalThis : this), function (root) {
   'use strict';
 
-  var VERSION = '1.0.4';
+  var VERSION = '1.1.0';
   var HELPER_ID = 'video-review-helper';
   var DEFAULT_PORTS = [47831, 47832, 47833, 47834, 47835];
   var UPLOAD_SHARE = 15;        /* percent of the whole operation */
   var WORK_SHARE = 80;
   var FINISH_SHARE = 5;
   var DEFAULT_MAX_BYTES = 6 * 1024 * 1024 * 1024;
-  var ALLOWED_OPTIONS = ['parakeet', 'whisper', 'noWhisper', 'noParakeet', 'threads'];
+  var ALLOWED_OPTIONS = ['parakeet', 'whisper', 'noWhisper', 'noParakeet', 'threads', 'teach'];
 
   /* What to do after a job failed inside the helper without a cause of its own (the helper's message says what went wrong). */
   var FAILED_NEXT = 'Try once more. If it keeps failing, try a shorter recording, or send the text in the helper window (or, if the helper has no window, the files in the logs folder of the tools folder) to the person who invited you to the beta.';
@@ -7385,7 +7455,34 @@ if (typeof module !== 'undefined' && module.exports) { module.exports = VIS; }
       return sendCancel(ctx.port, ctx.jobId).then(function () { return true; });
     }
 
-    return { check: check, run: run, cancel: cancel };
+    /* ---- "Teach it your ums": small JSON calls to the helper that run() found ------------------------- */
+    function teachCall(method, path, bodyObj, ms) {
+      return Promise.resolve().then(function () {
+        return lastPort ? lastPort : checkNow(null).then(function (st) { return st && st.found ? st.port : null; });
+      }).then(function (port) {
+        if (!port) { throw makeError('no-helper'); }
+        var init = { method: method };
+        if (bodyObj !== undefined) {
+          init.headers = { 'Content-Type': 'application/json' };
+          init.body = JSON.stringify(bodyObj);
+        }
+        return http(base(port) + path, init, ms || 30000).then(function (r) {
+          var d = tryJson(r.text);
+          if (r.status === 200 && d && typeof d === 'object') { return d; }
+          if (r.status === 404) { throw makeError('failed', 'This helper is too old to learn your ums. Update Video Redline and start the helper again.'); }
+          throw errorFromResponse(r.status, d, 'teach');
+        }, function () {
+          lastPort = null;
+          throw makeError('network');
+        });
+      });
+    }
+    function teachStatus() { return teachCall('GET', '/teach'); }
+    function teachModel() { return teachCall('GET', '/teach/model').then(function (d) { return d && d.model && typeof d.model === 'object' ? d.model : null; }); }
+    function teachExamples(videoKey, examples) { return teachCall('POST', '/teach/examples', { video: String(videoKey || ''), examples: examples || [] }, 60000); }
+    function teachForget(what) { return teachCall('POST', '/teach/forget', { what: what }, 60000); }
+
+    return { check: check, run: run, cancel: cancel, teachStatus: teachStatus, teachModel: teachModel, teachExamples: teachExamples, teachForget: teachForget };
   }
 
   return {
@@ -8626,6 +8723,12 @@ var CleanupPanel = (function () {
     '.cp-form .cp-field{flex-wrap:wrap}',
     '.cp-form .cp-in{flex:1;width:auto;min-width:0}',
     '.cp-form-msg{min-height:18px;color:var(--danger,#ff5d5d);margin:0}',
+    '.cp-teach p{margin:6px 0}',
+    '.cp-teach-status{font-weight:600}',
+    '.cp-teach-msg{min-height:18px;margin:4px 0;color:var(--muted,#9aa0ab)}',
+    '.cp-teach-err{color:var(--danger,#ff5d5d)}',
+    '.cp-teach .cp-prog{margin:6px 0}',
+    '.cp-teach .cp-check{margin-top:8px}',
     '.cp-form-msg.cp-okmsg{color:var(--ok,#3ecf8e)}',
     /* cleanup level: one compact segmented control (real radio buttons) and one help line for the chosen level */
     '.cp-level{border:0;margin:0;padding:0;min-width:0}',
@@ -8699,6 +8802,7 @@ var CleanupPanel = (function () {
     var drag = null;
     var uid = ++instanceCount;
     var tcClient = null, jobSeq = 0;  // the helper client (made on first use) and the number of the current / last job
+    var teachTc = null, teachSeq = 0; // "Teach it your ums": its own helper client (the page's wrapper only has check, run and cancel) and the number of the latest status request
     var wordIdx = null;               // sorted index of the transcript words (wordsBetween)
     var heldMemo = null;              // heldIds(): the ids of the held transcript's cards at every level, for the settings they were found with
 
@@ -8717,6 +8821,9 @@ var CleanupPanel = (function () {
       links: [], known: {}, strays: {}, shadow: {}, pageMade: new WeakSet(), ties: {}, analysisWarnings: [],
       selCard: '', selStart: 0, selA: -1, selB: -1, anchor: -1,
       undo: [], ui: null, cur: -1,
+      learned: null,                 // the helper's trained "my ums" model (Cleanup.scoreFingerprint reads it); null = none yet
+      teachSig: null,                // what the helper was last told about this video's Accept / Reject choices (so nothing is sent twice)
+      teach: { status: null, offline: false, busy: false, label: '', pct: 0, msg: '', said: '', error: '' },
       hits: [], hitCur: -1, query: '',
       lastUserScroll: 0, storageWarned: false, decisionsUnsaved: false, error: '',
       dormant: null, savedTid: '', forVideo: null,
@@ -8867,6 +8974,7 @@ var CleanupPanel = (function () {
       p.minGap = s.minGap; p.keepPause = s.keepPause; p.autoThreshold = s.autoPct / 100;
       p.includeDeadSpace = s.deadSpace; p.includeFillers = s.ums; p.includeStutters = s.stutters; p.includeNonWords = s.nonWords;
       if (s.fillerWords) { p.fillers = parseFillerList(s.fillerWords); }
+      if (S.learned && (!S.ui || S.ui.teachUse !== false)) { p.learned = S.learned; }      // what it learned from the person's own ums (it can only hold a cut back)
       return p;
     }
     function fillerText() { return S.settings.fillerWords || DEFAULT_FILLERS.join(', '); }
@@ -8877,6 +8985,7 @@ var CleanupPanel = (function () {
     function persistDecisions() {
       if (!S.tid) { return; }
       S.decisionsUnsaved = !jset(KEYS.decisions, { tid: S.tid, list: S.decisions });
+      scheduleTeachSync();
     }
     // with no transcript open, the links keep the id they were saved with, so the same file can pick them up again
     function persistKnown() { if (S.dormant) { return; } jset(KEYS.links, { tid: S.tid || S.savedTid || '', map: S.known }); }
@@ -9771,6 +9880,13 @@ var CleanupPanel = (function () {
       E.secRange = h('div', { 'class': 'cp-sec' }, [E.rangeToggle, E.rangeBody]);
       root.appendChild(E.secRange);
 
+      /* 3c. teach it your ums: recordings of the person's own ums, and what their Accept and Reject choices say */
+      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
+      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
+      E.teachBody = buildTeachBody();
+      E.secTeach = h('div', { 'class': 'cp-sec' }, [E.teachToggle, E.teachBody]);
+      root.appendChild(E.secTeach);
+
       /* 4. lists */
       E.lists = {};
       var listsWrap = h('div', { 'class': 'cp-sec' });
@@ -9914,6 +10030,220 @@ var CleanupPanel = (function () {
       return body;
     }
 
+    /* ===========================================================================================
+     * Teach it your ums. The helper keeps a small model of what the person's own ums sound like (fingerprints of sounds, never
+     * audio). It learns from recordings the person points at here, and from their Accept and Reject choices. The engine uses it as
+     * one more piece of evidence, and only to hold a cut back (a sound effect that the speech engines wrote as "um").
+     * ======================================================================================= */
+    var AUDIO_ACCEPT = 'audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+    function buildTeachBody() {
+      var body = h('div', { 'class': 'cp-body cp-teach', hidden: true });
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Teach the tool what YOUR ums sound like, so it stops cutting sound effects that it mistakes for ums. It learns from recordings you point it at and from your Accept and Reject choices (Reject means: this is not an um). Everything stays on this computer, and only numbers that describe each sound are kept, never the audio.' }));
+      E.teachStatus = h('p', { 'class': 'cp-teach-status', role: 'status', 'aria-live': 'polite' });
+      body.appendChild(E.teachStatus);
+      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of your ums' });
+      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of sounds that are not ums' });
+      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
+      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
+      E.teachUmBtn = btn('Choose a recording of your ums', 'cp-btn-primary', function () { E.teachUmFile.click(); }, null, 'One long recording of you saying um, uh, er, hmm ... with a short gap between each');
+      E.teachNotBtn = btn('Choose a recording of sounds that are not ums', '', function () { E.teachNotFile.click(); }, null, 'Sound effects, breaths, clicks, laughs: the sounds that get mistaken for ums');
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachUmBtn, E.teachNotBtn, E.teachUmFile, E.teachNotFile]));
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
+      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
+      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
+      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite' });
+      body.appendChild(E.teachBar);
+      body.appendChild(E.teachMsg);
+      E.teachClips = h('div', { 'class': 'cp-rows' });
+      body.appendChild(E.teachClips);
+      E.teachDecisions = h('p', { 'class': 'cp-sub' });
+      body.appendChild(E.teachDecisions);
+      E.teachUse = h('input', { type: 'checkbox' });
+      on(E.teachUse, 'change', function () {
+        S.ui.teachUse = !!E.teachUse.checked; persistUi();
+        if (S.transcript && S.learned) { applyLearned(); }
+      });
+      E.teachUseWrap = h('label', { 'class': 'cp-check' }, [E.teachUse, h('span', { text: 'Use what it learned when cleaning up' })]);
+      body.appendChild(E.teachUseWrap);
+      E.teachAgain = btn('Check again', 'cp-btn-sm', function () { refreshTeach(true); }, null, 'Ask the helper again what it has learned');
+      E.teachForget = btn('Forget everything it learned', 'cp-btn-sm cp-btn-no', function () { forgetTeach('all'); }, null, 'Delete what it learned from your recordings and your choices');
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachAgain, E.teachForget]));
+      return body;
+    }
+
+    function getTeachClient() {
+      if (teachTc) { return teachTc; }
+      var T = win.TranscriberClient || (typeof TranscriberClient !== 'undefined' ? TranscriberClient : null);
+      if (!T || typeof T.create !== 'function') { return null; }
+      try { teachTc = T.create({ ports: Array.isArray(options.transcriberPorts) && options.transcriberPorts.length ? options.transcriberPorts.slice() : TC_PORTS.slice() }); } catch (e) { teachTc = null; }
+      if (!teachTc || typeof teachTc.teachStatus !== 'function' || typeof teachTc.run !== 'function') { teachTc = null; }
+      return teachTc;
+    }
+    function pctText(x) { return Math.round(100 * num(x, 0)) + '%'; }
+    function teachStatusLine() {
+      var T = S.teach, st = T.status;
+      if (!getTeachClient()) { return 'This build has no helper, so there is nothing to teach.'; }
+      if (T.offline && !st) { return 'The helper is not running, so nothing can be learned right now. Start it (on Windows: double-click the Video Redline icon), then press Check again.'; }
+      if (!st) { return 'Asking the helper what it has learned ...'; }
+      var need = st.needs && st.needs.ums ? st.needs.ums : 10;
+      var line;
+      if (!st.ready) {
+        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums below, or Accept a few ums as they come up.';
+      } else if (st.kind === 'one-class') {
+        line = 'Learned how ' + st.ums + ' of your ums sound, and holds back sounds that look very different. Add a recording of sounds that are not ums to tell it where the line is.';
+      } else {
+        line = 'Learned from ' + st.ums + ' ums and ' + st.notums + ' sounds that are not ums.';
+        if (st.check && typeof st.check.recall === 'number') {
+          line += ' On examples it had not seen it recognised ' + pctText(st.check.recall) + ' of the ums' + (typeof st.check.rejects === 'number' ? ' and kept out ' + pctText(st.check.rejects) + ' of the other sounds' : '') + '.';
+        }
+      }
+      if (T.offline) { line += ' (The helper is not answering right now.)'; }
+      return line;
+    }
+    function renderTeach() {
+      if (!E.teachBody || !S.ui || !S.ui.teach) { return; }
+      var T = S.teach, st = T.status, has = !!getTeachClient();
+      setText(E.teachStatus, teachStatusLine());
+      setText(E.teachMsg, T.error || T.msg || T.said || '');
+      E.teachMsg.className = 'cp-teach-msg' + (T.error ? ' cp-teach-err' : '');
+      E.teachBar.hidden = !T.busy;
+      E.teachFill.style.width = Math.max(0, Math.min(100, T.pct)) + '%';
+      E.teachBar.setAttribute('aria-valuenow', String(Math.round(T.pct)));
+      [E.teachUmBtn, E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
+      E.teachAgain.disabled = !has || T.busy;
+      clearEl(E.teachClips);
+      ((st && st.clips) || []).forEach(function (c) {
+        var txt = c.name + ' · ' + (c.label === 'um' ? 'ums' : 'not ums') + ' · ' + c.sounds + ' ' + plural(c.sounds, 'sound', 'sounds') + (c.ignored ? ' (' + c.ignored + ' left out)' : '');
+        var row = h('div', { 'class': 'cp-row' }, [h('span', { 'class': 'cp-rtext', text: txt, title: txt })]);
+        var b = btn('Forget', 'cp-btn-sm', function () { forgetTeach('clip:' + c.id); }, null, 'Forget what this recording taught it');
+        b.disabled = T.busy;
+        row.appendChild(h('span', { 'class': 'cp-rbtns' }, [b]));
+        E.teachClips.appendChild(row);
+      });
+      var d = st && st.decisions ? st.decisions : null;
+      setText(E.teachDecisions, d && (d.ums || d.notums) ? 'From your Accept and Reject choices in your videos: ' + d.ums + ' ' + plural(d.ums, 'um', 'ums') + ' and ' + d.notums + ' not ' + plural(d.notums, 'um', 'ums') + '.' : '');
+      E.teachUse.checked = S.ui.teachUse !== false;
+      E.teachUse.disabled = !S.learned;
+      E.teachUseWrap.hidden = !(st && st.ready);
+    }
+
+    /** ask the helper what it has learned; with rerun, a changed model is applied to this video's cuts right away */
+    function refreshTeach(rerun) {
+      var tc = getTeachClient();
+      if (!tc) { S.teach.offline = false; renderTeach(); return Promise.resolve(); }
+      var seq = ++teachSeq;
+      return Promise.all([tc.teachStatus(), tc.teachModel()]).then(function (r) {
+        if (destroyed || seq !== teachSeq) { return; }
+        var before = modelKey(S.learned);
+        S.teach.offline = false; S.teach.status = r[0]; S.learned = r[1];
+        renderTeach();
+        if (rerun && S.transcript && modelKey(S.learned) !== before) { applyLearned(); }
+      }, function () {
+        if (destroyed || seq !== teachSeq) { return; }
+        S.teach.offline = true; renderTeach();
+      });
+    }
+    function modelKey(m) { return m && typeof m === 'object' ? [m.kind, m.trained, m.ums, m.notums].join(':') : ''; }
+
+    /** run the analysis again with (or without) the model; the person's Accept and Reject choices are kept */
+    function applyLearned() {
+      if (destroyed || !S.transcript) { return; }
+      var before = counts().pending;
+      runAnalysis(true);
+      S.undo = [];
+      renderAll(true);
+      var after = counts().pending;
+      if (after > before) { toast(after - before + ' more ' + plural(after - before, 'cut waits', 'cuts wait') + ' for your decision now (sounds that do not look like your ums).'); }
+    }
+
+    function startTeach(label, file) {
+      var tc = getTeachClient(), T = S.teach;
+      if (!tc || T.busy || !file) { return; }
+      T.busy = true; T.label = label; T.pct = 0; T.error = ''; T.said = ''; T.msg = 'Sending the recording to the helper ...';
+      renderTeach();
+      var name = String(file.name || 'recording');
+      tc.run(file, { teach: label }, function (pg) {
+        if (destroyed) { return; }
+        T.pct = num(pg && pg.percent, 0);
+        T.msg = pg && pg.phase === 'uploading' ? 'Sending the recording to the helper ...' : (pg && pg.phase === 'finishing' ? 'Finishing ...' : (pg && pg.message ? String(pg.message) : 'Learning the sounds ...'));
+        renderTeach();
+      }).then(function (res) {
+        if (destroyed) { return; }
+        T.busy = false; T.msg = ''; T.error = '';
+        var used = res && res.used ? res.used : 0, ign = res && res.ignored ? res.ignored : 0;
+        T.said = 'Learned from ' + used + ' ' + (label === 'um' ? plural(used, 'um', 'ums') : 'not-um ' + plural(used, 'sound', 'sounds')) + ' in “' + name + '”' + (ign ? ' (' + ign + ' left out because ' + plural(ign, 'it', 'they') + ' looked unlike the rest)' : '') + '.';
+        if (res && res.summary) { T.status = res.summary; }
+        return refreshTeach(true);
+      }, function (err) {
+        if (destroyed) { return; }
+        T.busy = false; T.msg = ''; T.said = '';
+        var code = err && err.code;
+        T.error = code === 'busy' ? 'The helper is busy making a transcript. Try again when it has finished.'
+          : code === 'no-helper' ? 'I cannot find the helper. Start it (on Windows: double-click the Video Redline icon), then try again.'
+          : code === 'cancelled' ? 'Cancelled. Nothing was kept.'
+          : (err && err.message ? String(err.message) : 'That recording could not be used.');
+        renderTeach();
+      });
+    }
+
+    function forgetTeach(what) {
+      var tc = getTeachClient(), T = S.teach;
+      if (!tc || T.busy) { return; }
+      var q = what === 'all' ? 'Forget everything the tool learned about your ums (your recordings and your Accept and Reject choices)?' : 'Forget what this recording taught it?';
+      var ok = true;
+      try { ok = typeof api.confirm === 'function' ? !!api.confirm(q) : true; } catch (e) { ok = true; }
+      if (!ok) { return; }
+      T.said = ''; T.error = '';
+      tc.teachForget(what).then(function (summary) {
+        if (destroyed) { return; }
+        T.status = summary;
+        if (what === 'all') { S.teachSig = null; }
+        return refreshTeach(true);
+      }, function (err) {
+        if (destroyed) { return; }
+        T.error = err && err.message ? String(err.message) : 'The helper could not forget that.';
+        renderTeach();
+      });
+    }
+
+    /** the Accept and Reject choices of this video as examples: an Accepted card is an um, a Rejected one is not. Only sounds
+     *  the helper fingerprinted can teach it. An automatic cut that the person removed counts as "not an um" only when they removed
+     *  a few of them: when they undid most automatic cuts at once ("Undo all automatic cuts", undo of the whole batch) they were
+     *  turning the cleanup down, which says nothing about each sound. */
+    function teachExamples() {
+      var out = [], tr = S.transcript;
+      if (!tr || !Array.isArray(tr.words)) { return out; }
+      var fill = S.candidates.filter(function (c) { return c.kind === 'filler' && c.words && c.words.length === 1; });
+      var autoN = 0, autoRej = 0;
+      fill.forEach(function (c) { if (c.eff === 'auto') { autoN++; if (c.st === 'rejected') { autoRej++; } } });
+      var autoOk = autoRej <= Math.max(3, Math.round(0.25 * autoN));
+      fill.forEach(function (c) {
+        var w = tr.words[c.words[0]];
+        if (!w || !Array.isArray(w.fp)) { return; }
+        if (c.st === 'accepted' && c.eff !== 'auto') { out.push({ label: 'um', fp: w.fp }); }
+        else if (c.st === 'rejected' && (c.eff !== 'auto' || autoOk)) { out.push({ label: 'notum', fp: w.fp }); }
+      });
+      return out;
+    }
+    function teachVideoKey() {
+      var name = safe(function () { return api.getVideoName ? api.getVideoName() : ''; }, '') || '';
+      return String(name) + '|' + num(safe(function () { return api.getDuration(); }, 0), 0).toFixed(3);
+    }
+    function scheduleTeachSync() { if (!destroyed && S.transcript) { later('teachsync', 1500, doTeachSync); } }
+    function doTeachSync() {
+      var tc = getTeachClient();
+      if (!tc || !S.transcript || S.teach.busy) { return; }
+      var ex = teachExamples();
+      if (!ex.length && S.teachSig === null) { return; }               // nothing to tell, and nothing was told before
+      var sig = hashString(JSON.stringify(ex));
+      if (sig === S.teachSig) { return; }
+      var key = teachVideoKey();
+      tc.teachExamples(key, ex).then(function (summary) {
+        if (destroyed) { return; }
+        S.teachSig = sig; S.teach.status = summary; S.teach.offline = false; renderTeach();
+      }, function () { /* the helper is not there right now: the next decision tries again */ });
+    }
+
     function buildRangeBody() {
       var body = h('div', { 'class': 'cp-body cp-form', hidden: true });
       E.rStart = h('input', { type: 'text', 'class': 'cp-in', placeholder: '1:23.45', 'aria-label': 'Start time', autocomplete: 'off', spellcheck: 'false' });
@@ -9938,7 +10268,8 @@ var CleanupPanel = (function () {
     function toggleUi(name) {
       if (name === 'settings') { S.setPin = !settingsOpen(); renderDisclosures(); return; }
       S.ui[name] = !S.ui[name]; persistUi(); renderDisclosures();
-      if (name !== 'range' && name !== 'advanced') { renderLists(); }
+      if (name === 'teach' && S.ui.teach) { refreshTeach(false); }
+      if (name !== 'range' && name !== 'advanced' && name !== 'teach') { renderLists(); }
     }
 
     function renderDisclosures() {
@@ -9954,6 +10285,7 @@ var CleanupPanel = (function () {
       // closed, the one line still names the level: "Cleanup level: Balanced - change"
       setDisc(E.setToggle, E.setBody, so ? 'Settings' : (lv ? 'Cleanup level: ' + lv.label + ' - change' : 'Settings - change'), so);
       setDisc(E.advToggle, E.advBody, 'Advanced', !!S.ui.advanced);
+      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'Teach it your ums', !!S.ui.teach); renderTeach(); }
       setDisc(E.rangeToggle, E.rangeBody, 'Cut a time range', !!S.ui.range);
       var n = listCounts();
       ['applied', 'mine', 'rejected'].forEach(function (k) { setDisc(E.lists[k].toggle, E.lists[k].body, E.lists[k].label, !!S.ui[k], n[k]); });
@@ -11248,6 +11580,7 @@ var CleanupPanel = (function () {
         if (!r || !r.found) { showHelp(token, 'no-helper', r && r.problem, { help: r && r.help }); return; }
         if (!r.ready) { showHelp(token, 'not-ready', r.problem, { help: r.help, checking: r.checking === true }); return; }
         if (r.busy) { showHelp(token, 'busy', r.problem, { help: r.help }); return; }
+        refreshTeach(false);                  // the helper is there: get what it learned from the person's ums ready for the analysis of the new transcript
         runJob(client, file, token);
       });
     }
@@ -11412,7 +11745,8 @@ var CleanupPanel = (function () {
     // chose since); "Advanced" is closed until opened, and that is remembered.
     S.ui = {
       advanced: !!uiRaw.advanced, applied: !!uiRaw.applied, mine: !!uiRaw.mine,
-      rejected: !!uiRaw.rejected, range: uiRaw.uiv >= 2 ? !!uiRaw.range : true, follow: uiRaw.follow !== false, uiv: 4
+      rejected: !!uiRaw.rejected, range: uiRaw.uiv >= 2 ? !!uiRaw.range : true, follow: uiRaw.follow !== false, uiv: 4,
+      teach: !!uiRaw.teach, teachUse: uiRaw.teachUse !== false
     };
     injectStyle();
     host.appendChild(buildSkeleton());
@@ -11459,6 +11793,11 @@ var CleanupPanel = (function () {
       }
       renderAll();
     })();
+    // What the helper has learned from the person's own ums. It is asked for here only when the person has the Teach section open or the
+    // open transcript came from the helper (so the helper has been used on this computer): asking a helper that is not there would
+    // print refused connections in the browser's console. It is also asked for when a transcript is about to be made. A transcript that is
+    // already open is left as it is (nothing changes by itself when a video opens); the model is used by the next analysis.
+    if (S.ui.teach || (S.transcript && S.source && S.source.kind === 'helper')) { later('teachboot', 400, function () { refreshTeach(false); }); }
 
     var ctrl = {
       load: load,
@@ -11520,6 +11859,9 @@ var CleanupPanel = (function () {
           try { var cr = tcClient.cancel(); if (cr && typeof cr.then === 'function') { cr.then(null, function () { /* ignore */ }); } } catch (e) { /* ignore */ }
         }
         jobSeq++; S.job = null;
+        if (S.teach.busy && teachTc && typeof teachTc.cancel === 'function') {          // a recording that is still being learned from is dropped
+          try { var tr0 = teachTc.cancel(); if (tr0 && typeof tr0.then === 'function') { tr0.then(null, function () { /* ignore */ }); } } catch (e) { /* ignore */ }
+        }
         Object.keys(timers).forEach(function (k) { if (timers[k]) { clearTimeout(timers[k]); } });
         offs.forEach(function (f) { try { f(); } catch (e) { /* ignore */ } });
         if (E.root && E.root.parentNode) { E.root.parentNode.removeChild(E.root); }

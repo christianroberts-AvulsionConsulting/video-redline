@@ -193,6 +193,34 @@
   }
   function logit(p) { p = clamp(p, 0.02, 0.98); return Math.log(p / (1 - p)); }
   function sigmoid(z) { return 1 / (1 + Math.exp(-z)); }
+
+  /* "Teach it your ums": how much a sound's fingerprint (46 numbers the helper measures, see tools/vrt_teach.py) looks like the
+     person's own ums, 0 to 1. `model` is what the helper trained (GET /teach/model). null when the model or the fingerprint do not fit.
+     The arithmetic is the same as score() in vrt_teach.py (a test checks that the two agree). */
+  function scoreFingerprint(model, fp) {
+    if (!isObj(model) || !Array.isArray(fp) || !Array.isArray(model.mean) || !Array.isArray(model.std)) return null;
+    var n = fp.length, i;
+    if (n < 1 || model.features !== n || model.mean.length !== n || model.std.length !== n) return null;
+    var z = new Array(n);
+    for (i = 0; i < n; i++) {
+      var v = num(fp[i], NaN), sd = num(model.std[i], NaN), mu = num(model.mean[i], NaN);
+      if (!isFinite(v) || !isFinite(sd) || !isFinite(mu) || sd <= 0) return null;
+      z[i] = clamp((v - mu) / sd, -6, 6);
+    }
+    if (model.kind === 'two-class') {
+      if (!Array.isArray(model.w) || model.w.length !== n) return null;
+      var s = num(model.b, 0);
+      for (i = 0; i < n; i++) s += z[i] * num(model.w[i], 0);
+      return sigmoid(clamp(s, -30, 30));
+    }
+    if (model.kind === 'one-class') {
+      var d2 = 0, edge = num(model.edge, NaN), slope = num(model.slope, NaN);
+      if (!isFinite(edge) || edge <= 0 || !isFinite(slope)) return null;
+      for (i = 0; i < n; i++) d2 += z[i] * z[i];
+      return sigmoid(clamp(-(d2 / n / edge - 1) * slope, -30, 30));
+    }
+    return null;
+  }
   function fmtDur(x) { return String(Math.round(x * 100) / 100); }
   function q(s) { return '\u201C' + s + '\u201D'; }
   function cutLine(a, b) { return 'Cuts ' + formatTime(a) + ' to ' + formatTime(b) + ' (' + fmtDur(b - a) + ' s).'; }
@@ -394,6 +422,7 @@
     o.includeFillers = bool(p.includeFillers, d.includeFillers);
     o.includeDeadSpace = bool(p.includeDeadSpace, d.includeDeadSpace);
     o.includeFalseStarts = bool(p.includeFalseStarts, d.includeFalseStarts);
+    o.learned = isObj(p.learned) ? p.learned : null;      // the trained "my ums" model (see scoreFingerprint); null = not used
     // only a list (array) or a comma separated string changes the filler list; null, a number, an object or a
     // boolean fall back to the defaults like any other bad value (an explicit [] or '' still means "no fillers")
     o.filler = normaliseFillerList(Array.isArray(p.fillers) || typeof p.fillers === 'string' ? p.fillers : d.fillers);
@@ -429,6 +458,7 @@
       T.push({
         i: i, w: text, disp: disp, n: n, key: fillerKey(n), s: s, e: e,
         c: cKnown ? clamp(c, 0, 1) : 0.7, cKnown: cKnown, src: srcOf(w.src),
+        fp: Array.isArray(w.fp) && w.fp.length > 0 && w.fp.length <= 128 ? w.fp : null,   // the helper's fingerprint of an um-like sound
         frag: isFrag, isNum: /[0-9]/.test(n) || isNumberWord(n),
         caps: base.length >= 2 && base.length <= 3 && base === base.toUpperCase() && base !== base.toLowerCase(),
         // punctuation the engine wrote after the word: a full stop, "?" or "!" ends the sentence, so the next word
@@ -646,6 +676,18 @@
     } else if (tok.src === 'whisper') {
       z -= 0.3; // nothing to confirm a Whisper-only word
     }
+    // What the person taught the tool (Teach it your ums). It can only hold a cut back: a sound that looks nothing like their ums
+    // (a sound effect, a pop) loses up to 3 log-odds, and when it looks clearly unlike them it is never applied without asking (both
+    // engines agreeing on a sound effect would otherwise still be sure enough); a sound that looks like an um adds nothing.
+    var mine = null;
+    if (P.learned && tok.fp) {
+      var um = scoreFingerprint(P.learned, tok.fp);
+      if (um !== null) {
+        var lz = clamp(logit(um) * 0.8, -3, 0);
+        if (lz < -0.05) { z += lz; mine = um; }
+        if (um < 0.35) force = true;
+      }
+    }
     var conf = sigmoid(z);
 
     var parts = [];
@@ -662,15 +704,20 @@
       parts.push(heard + '.');
       if (cls.inferred) parts.push('It is not on your filler list, but it is short and not a normal word, so it looks like an \u201Cum\u201D.');
     }
+    if (mine !== null && mine < 0.5) {
+      parts.push('It does not sound much like the ums you taught the tool (about ' + Math.max(1, Math.round(mine * 100)) + '% like them), so it could be a sound effect or another sound. Please listen first.');
+    }
     if (dur > P.longFiller) {
       conf -= 0.2; force = true;
       parts.push('It lasts ' + fmtDur(dur) + ' s, which is long for a filler (a speech engine can stretch one over a pause), so please listen first.');
     }
     parts.push(CUT_MARK);
-    return {
+    var out = {
       kind: 'filler', start: r[0], end: r[1], text: tok.disp, confidence: conf, force: force,
       src: srcSetOf([tok], audio !== 'unknown'), words: [tok.i], reason: parts.join(' ')
     };
+    if (mine !== null) out.mine = mine;
+    return out;
   }
 
   function detectFillers(ctx, out) {
@@ -1290,6 +1337,7 @@
         status: status, reason: reason, src: k.src, words: k.words
       };
       if (k.partial) cand.partial = true; // optional: only part of the listed word is cut (a joined stutter such as "wh-what")
+      if (typeof k.mine === 'number') cand.mine = k.mine; // optional: how much this sound looked like the person's own ums (see scoreFingerprint)
       cands.push(cand);
       var len = end - start;
       cutSeconds += len;
@@ -1372,6 +1420,13 @@
     'It can open the transcript file made by the helper script (.json), a Whisper transcript (.json), or a subtitle file (.srt or .vtt).';
 
   // --- generic word list -> canonical, sorted, validated words
+  // a fingerprint is a short list of plain numbers; anything else is dropped
+  function cleanFingerprint(fp) {
+    if (!Array.isArray(fp) || fp.length < 1 || fp.length > 128) return null;
+    var out = new Array(fp.length);
+    for (var i = 0; i < fp.length; i++) { var v = fp[i]; if (typeof v !== 'number' || !isFinite(v)) return null; out[i] = v; }
+    return out;
+  }
   function normaliseWordList(raw, defaultSrc, warnings) {
     var out = [], dropped = 0, fixed = 0;
     for (var i = 0; i < raw.length; i++) {
@@ -1387,7 +1442,10 @@
       var c = num(x.c, NaN);
       if (isFinite(c) && c > 1.5 && c <= 100) c = c / 100;
       var src = srcOf(x.src); if (src === 'other') src = defaultSrc;
-      out.push({ w: w, s: s, e: e, c: isFinite(c) ? clamp(c, 0, 1) : null, src: src, _i: i });
+      var rec = { w: w, s: s, e: e, c: isFinite(c) ? clamp(c, 0, 1) : null, src: src, _i: i };
+      var fp = cleanFingerprint(x.fp);
+      if (fp) rec.fp = fp;                          // the helper's fingerprint of an um-like sound (see scoreFingerprint): kept as it is
+      out.push(rec);
     }
     out.sort(function (a, b) { return a.s - b.s || a.e - b.e || a._i - b._i; });
     for (var j = 0; j < out.length; j++) delete out[j]._i;
@@ -1809,6 +1867,7 @@
     parseTranscript: parseTranscript,
     validateTranscript: validateTranscript,
     analyze: analyze,
+    scoreFingerprint: scoreFingerprint,
     mergeCuts: mergeCuts,
     wordsInRange: wordsInRange,
     describeKind: describeKind,

@@ -14,6 +14,7 @@ Usage:
 Other modes:
     transcribe.py --download-models   (one-time download of the speech models)
     transcribe.py --self-test         (quick check that everything works)
+    transcribe.py <recording> --teach um|notum   (learn from a recording of your ums, or of sounds that are not ums; see vrt_teach.py)
     transcribe.py --check-venv        (setup uses this: does the private Python belong to this folder?)
     transcribe.py --check-packages    (setup uses this: can every speech package be loaded on this computer?)
 """
@@ -45,6 +46,7 @@ sys.path.insert(0, TOOLS_DIR)
 import argparse
 import datetime
 import json
+import re
 import shutil
 import tempfile
 import time
@@ -248,6 +250,14 @@ def build_parser():
                     help="check that the private Python in venv/ belongs to this folder (used by setup), then stop")
     ap.add_argument("--check-packages", action="store_true",
                     help="check that every speech package loads on this computer (used by setup), then stop")
+    ap.add_argument("--teach", choices=["um", "notum"],
+                    help="learn from a recording instead of making a transcript: um = it is full of ums and uhs, "
+                         "notum = it is full of sounds that are NOT ums (sound effects, breaths, clicks)")
+    ap.add_argument("--teach-name", help="the recording's own file name (shown in the list of what it learned from)")
+    ap.add_argument("--teach-sync", action="store_true",
+                    help="read the Accept / Reject examples of one video as JSON on stdin, store them, retrain, print the summary")
+    ap.add_argument("--teach-forget", metavar="WHAT",
+                    help="forget what was learned (all, clips, decisions, or clip:<id> for one recording), then print the summary")
     ap.add_argument("--keep-temp", action="store_true", help="keep the temporary audio file (for debugging)")
     ap.add_argument("--debug-dump", metavar="DIR", help="also save each engine's raw words into DIR (for debugging)")
     ap.add_argument("--version", action="version", version="transcribe.py " + HELPER_VERSION)
@@ -482,6 +492,11 @@ def run_pipeline(args, progress_cb=None):
         spans = [(w["s"], w["e"]) for w in words]
         sil = silences_without_words(env.silences(0.3), words)
         sounds = env.sounds(spans)
+        try:                                       # a fingerprint of every um-like sound, for "Teach it your ums" (never breaks a transcript)
+            import vrt_teach
+            vrt_teach.attach_fingerprints(words, pcm)
+        except Exception:
+            pass
         timings["merge"] = time.time() - t
         prog.finish_stage()
 
@@ -516,6 +531,77 @@ def run_pipeline(args, progress_cb=None):
             pcm.close()
         if not getattr(args, "keep_temp", False):
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def run_teach(args):
+    """--teach: decode a recording, find the separate sounds in it, fingerprint them and add them to what the helper has learned."""
+    import hashlib
+    import vrt_audio as A
+    import vrt_teach as T
+
+    in_path = os.path.abspath(args.input)
+    if not os.path.isfile(in_path):
+        raise FriendlyError("I can't find that file: %s" % in_path)
+    out_path = os.path.abspath(args.out) if args.out else os.path.join(os.path.dirname(in_path), "teach-result.json")
+    label = args.teach
+    name = (args.teach_name or os.path.basename(in_path))[:120]
+    h = hashlib.sha1()
+    with open(in_path, "rb") as f:
+        h.update(f.read(4 * 1024 * 1024))
+    clip_key = "%s|%d" % (h.hexdigest(), os.path.getsize(in_path))
+
+    prog = Progress([("decode", "Reading the sound from your recording", 45), ("analyse", "Measuring loudness and quiet gaps", 15),
+                     ("learn", "Learning the sounds", 40)], machine=args.machine)
+    tmp_dir = make_tmp_dir()
+    raw_path = os.path.join(tmp_dir, "audio.raw")
+    pcm = None
+    try:
+        prog.start("decode", "file: %s" % name)
+        try:
+            A.decode_to_pcm(in_path, raw_path, on_progress=lambda fr: prog.update(fr))
+        except A.AudioProblem as e:
+            raise FriendlyError(str(e), getattr(e, "hint", None))
+        prog.finish_stage()
+        pcm = A.open_pcm(raw_path)
+        prog.start("analyse")
+        env = A.Envelope(pcm, A.compute_db(pcm))
+        prog.finish_stage()
+        prog.start("learn")
+        spans = T.clip_sounds(env, label)
+        if len(spans) < 3:
+            raise FriendlyError("I could not find separate sounds in that recording.",
+                                "Record the sounds one at a time with a short gap between each (a second is plenty), in a quiet "
+                                "room, and make sure the recording is not silent.")
+        fps = []
+        for i, (a, b) in enumerate(spans):
+            fp = T.fingerprint(A.to_float(pcm, int(a * T.SR), int(b * T.SR)))
+            if fp:
+                fps.append(fp)
+            prog.update((i + 1) / float(len(spans)))
+        found = len(fps)
+        dropped = 0
+        if label == "um":
+            fps, dropped = T.drop_outliers(fps)
+        if len(fps) < 3:
+            raise FriendlyError("I could not use the sounds in that recording.", "Try a clearer recording with a short gap between the sounds.")
+        summary = T.add_clip(label, name, fps, dropped, T.clip_id_for(label, clip_key))
+        prog.finish_stage()
+    finally:
+        if pcm is not None:
+            pcm.close()
+        if not getattr(args, "keep_temp", False):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    doc = {"format": "video-redline-teach", "version": 1, "label": label, "name": name, "found": found, "used": len(fps),
+           "ignored": dropped, "summary": summary}
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    tmp_out = out_path + ".part"
+    with open(tmp_out, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp_out, out_path)
+    say("")
+    say("Learned from %d %s sound%s (%d left out because they looked unlike the rest)." % (
+        len(fps), "um" if label == "um" else "not-um", "" if len(fps) == 1 else "s", dropped))
+    return 0
 
 
 def print_summary(res, args):
@@ -655,8 +741,23 @@ def main(argv=None):
             raise FriendlyError(problem[0], problem[1])
         if args.download_models:
             return download_models(args)
+        if args.teach_sync or args.teach_forget:
+            import vrt_teach
+            if args.teach_forget:
+                if not re.fullmatch(r"all|clips|decisions|clip:[0-9a-f]{1,32}", args.teach_forget):
+                    raise FriendlyError("I do not know what to forget: %s" % args.teach_forget[:40])
+                summary = vrt_teach.forget(args.teach_forget)
+            else:
+                body = json.loads(sys.stdin.buffer.read(40 * 1024 * 1024).decode("utf-8"))
+                summary = vrt_teach.sync_video(body.get("video", ""), body.get("examples", []))
+            print(json.dumps(summary, separators=(",", ":")), flush=True)
+            return 0
         if args.self_test:
             return self_test(args)
+        if args.teach:
+            if not args.input:
+                raise FriendlyError("Please give me a recording to learn from.")
+            return run_teach(args)
         if not args.input:
             ap.print_usage()
             raise FriendlyError("Please give me a video file to transcribe.", how_to_give_a_video())

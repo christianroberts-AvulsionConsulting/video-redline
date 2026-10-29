@@ -35,6 +35,16 @@ Endpoints (JSON unless noted)
     POST   /jobs/<id>/cancel         stop the work and delete the job folder
     DELETE /jobs/<id>                stop the work, delete the job folder, forget the job
 
+    "Teach it your ums" (what the helper learned from the person's own ums; fingerprints only, never audio; see vrt_teach.py)
+    POST   /jobs?name=<file name>    with X-Options { teach: "um" | "notum" }: the upload is a recording of ums (or of sounds that are
+                                     not ums) to learn from instead of a video to transcribe; the result is { format:
+                                     "video-redline-teach", found, used, ignored, summary }
+    GET    /teach                    the summary { ready, kind, ums, notums, clips, decisions, check, trained, needs }
+    GET    /teach/model              { ok, model } (model is null until there are enough ums); the page scores sounds with it
+    POST   /teach/examples           body = JSON { video, examples: [{ label: "um"|"notum", fp: [numbers] }] }: replaces what the
+                                     Accept / Reject choices of ONE video taught it, retrains, answers with the summary
+    POST   /teach/forget             body = JSON { what: "all" | "clips" | "decisions" | "clip:<id>" }, answers with the summary
+
 Errors are always { error: "<code>", message: "<plain language>" }.
 
 SECURITY: WHAT THIS HELPER DOES AND DOES NOT PROTECT (read this before changing the checks below)
@@ -274,6 +284,7 @@ STAGE_TEXT = {
     "parakeet": "Finding every word and its exact time",
     "whisper": "Listening for the ums and uhs",
     "merge": "Putting it all together",
+    "learn": "Learning the sounds",
 }
 
 
@@ -740,6 +751,54 @@ def private_python():
     return sys.executable
 
 
+TEACH_DIR = os.environ.get("VRT_TEACH_DIR") or os.path.join(TOOLS_DIR, "teach")      # (the variable is for tests)
+TEACH_MAX_BODY = 20 * 1024 * 1024          # the examples of one video (a few thousand fingerprints) are well under this
+TEACH_LOCK = threading.Lock()              # one change to what was learned at a time
+
+
+def teach_summary():
+    """What the page shows about the training. Plain file reading (no numpy here): the file is written by vrt_teach.py."""
+    try:
+        with open(os.path.join(TEACH_DIR, "summary.json"), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            return d
+    except (OSError, ValueError):
+        pass
+    return {"ok": True, "ready": False, "kind": None, "ums": 0, "notums": 0, "clips": [], "decisions": {"ums": 0, "notums": 0},
+            "check": None, "trained": None, "needs": {"ums": 10, "each": 8}}
+
+
+def teach_model():
+    try:
+        with open(os.path.join(TEACH_DIR, "model.json"), "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def run_teach_cli(args, data):
+    """Run transcribe.py in one of its quick teach modes; returns the summary it prints, or None when it failed."""
+    with TEACH_LOCK:
+        try:
+            r = subprocess.run([private_python(), TRANSCRIBE_PY] + args, input=data if data is not None else b"",
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=child_env(), cwd=TOOLS_DIR,
+                               timeout=120, **popen_kwargs())
+        except (OSError, subprocess.SubprocessError) as e:
+            debug("teach: could not run transcribe.py: %r" % (e,))
+            return None
+    lines = [ln for ln in r.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    if r.returncode != 0 or not lines:
+        debug("teach: transcribe.py exited with %r: %s" % (r.returncode, "\n".join(lines[-5:])))
+        return None
+    try:
+        d = json.loads(lines[-1])
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) else None
+
+
 def popen_kwargs():
     if IS_WIN:
         return {"creationflags": 0x08000000}          # CREATE_NO_WINDOW: no extra black windows
@@ -1110,6 +1169,11 @@ def parse_options(header):
         if isinstance(v, bool) or not isinstance(v, int) or v < 1 or v > 64:
             raise ValueError("The number of threads must be a whole number from 1 to 64.")
         out["threads"] = v
+    v = d.get("teach")
+    if v is not None:
+        if v not in ("um", "notum"):
+            raise ValueError("The teach option must be um or notum.")
+        out["teach"] = v
     if out.get("noWhisper") and out.get("noParakeet"):
         raise ValueError("Both speech engines are switched off, so there would be nothing to do.")
     return out
@@ -1204,11 +1268,11 @@ def finish_done(job, elapsed):
         job.percent = 100
         job.stage = "done"
         job.eta = None
-        job.message = "Your transcript is ready."
+        job.message = "Done." if getattr(job, "teach", None) else "Your transcript is ready."
         job.finished = time.time()
     remove_quiet(job.input)
     REG.release(job)
-    CON.log("Job finished in %d s. The page can pick up the transcript now." % int(elapsed))
+    CON.log("Job finished in %d s. The page can pick up the %s now." % (int(elapsed), "result" if getattr(job, "teach", None) else "transcript"))
 
 
 def cancel_job(job, why="Cancelled."):
@@ -1236,14 +1300,18 @@ def cancel_job(job, why="Cancelled."):
 
 def run_job(job, options):
     cmd = [private_python(), TRANSCRIBE_PY, job.input, "--out", job.result, "--machine"]
-    if options.get("parakeet"):
-        cmd += ["--parakeet", options["parakeet"]]
-    if options.get("whisper"):
-        cmd += ["--whisper", options["whisper"]]
-    if options.get("noWhisper"):
-        cmd.append("--no-whisper")
-    if options.get("noParakeet"):
-        cmd.append("--no-parakeet")
+    job.teach = options.get("teach")
+    if job.teach:                                      # learn from a recording of ums instead of making a transcript
+        cmd += ["--teach", job.teach, "--teach-name", job.name]
+    else:
+        if options.get("parakeet"):
+            cmd += ["--parakeet", options["parakeet"]]
+        if options.get("whisper"):
+            cmd += ["--whisper", options["whisper"]]
+        if options.get("noWhisper"):
+            cmd.append("--no-whisper")
+        if options.get("noParakeet"):
+            cmd.append("--no-parakeet")
     if options.get("threads"):
         cmd += ["--threads", str(options["threads"])]
     # Only one helper at a time may be in the short window between starting transcribe.py and its scratch folder appearing,
@@ -1589,6 +1657,8 @@ class Handler(BaseHTTPRequestHandler):
                 if method != "POST":
                     return self._method_not_allowed("POST")
                 return self._post_job()
+            if path == "/teach" or path.startswith("/teach/"):
+                return self._teach(method, path)
             m = re.fullmatch(r"/jobs/([^/]+)(?:/(result|cancel))?", path)
             if not m:
                 return self.fail(404, "not-found", "There is nothing at that address.")
@@ -1645,6 +1715,49 @@ class Handler(BaseHTTPRequestHandler):
             body["problem"] = problem
             body["checking"] = bool(checking)
         self._send_json(200, body)
+
+    # ---- /teach ------------------------------------------------------------------------------------
+    def _teach(self, method, path):
+        """What the helper learned from the person's ums. Reading is plain files; changing it runs transcribe.py (numpy lives
+        there), one change at a time."""
+        if path == "/teach":
+            if method != "GET":
+                return self._method_not_allowed("GET")
+            return self._send_json(200, teach_summary())
+        if path == "/teach/model":
+            if method != "GET":
+                return self._method_not_allowed("GET")
+            return self._send_json(200, {"ok": True, "model": teach_model()})
+        if path not in ("/teach/examples", "/teach/forget"):
+            return self.fail(404, "not-found", "There is nothing at that address.")
+        if method != "POST":
+            return self._method_not_allowed("POST")
+        cl = (self.headers.get("Content-Length") or "").strip()
+        if self.headers.get("Transfer-Encoding") is not None or not re.fullmatch(r"[0-9]{1,15}", cl or "x"):
+            return self.fail(411, "length-required", "The request must say how large it is (Content-Length).")
+        if int(cl) > TEACH_MAX_BODY:
+            return self.fail(413, "too-big", "That is more than the helper takes in one go.")
+        try:
+            raw = self.rfile.read(int(cl))
+            self.body_remaining = 0
+            body = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, OSError):
+            return self.fail(400, "bad-request", "The request could not be read.")
+        if not isinstance(body, dict):
+            return self.fail(400, "bad-request", "The request could not be read.")
+        if path == "/teach/forget":
+            what = body.get("what")
+            if not isinstance(what, str) or not re.fullmatch(r"all|clips|decisions|clip:[0-9a-f]{1,32}", what):
+                return self.fail(400, "bad-request", "Say what to forget: all, clips, decisions or clip:<id>.")
+            args, data = ["--teach-forget", what], None
+        else:
+            if not isinstance(body.get("examples"), list):
+                return self.fail(400, "bad-request", "The examples are missing.")
+            args, data = ["--teach-sync"], raw
+        summary = run_teach_cli(args, data)
+        if summary is None:
+            return self.fail(500, "teach-failed", "The helper could not store that. Try again.")
+        self._send_json(200, summary)
 
     # ---- POST /jobs --------------------------------------------------------------------------------
     def _post_job(self):

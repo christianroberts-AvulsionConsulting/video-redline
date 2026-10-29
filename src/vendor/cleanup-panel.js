@@ -1227,6 +1227,12 @@ var CleanupPanel = (function () {
     '.cp-form .cp-field{flex-wrap:wrap}',
     '.cp-form .cp-in{flex:1;width:auto;min-width:0}',
     '.cp-form-msg{min-height:18px;color:var(--danger,#ff5d5d);margin:0}',
+    '.cp-teach p{margin:6px 0}',
+    '.cp-teach-status{font-weight:600}',
+    '.cp-teach-msg{min-height:18px;margin:4px 0;color:var(--muted,#9aa0ab)}',
+    '.cp-teach-err{color:var(--danger,#ff5d5d)}',
+    '.cp-teach .cp-prog{margin:6px 0}',
+    '.cp-teach .cp-check{margin-top:8px}',
     '.cp-form-msg.cp-okmsg{color:var(--ok,#3ecf8e)}',
     /* cleanup level: one compact segmented control (real radio buttons) and one help line for the chosen level */
     '.cp-level{border:0;margin:0;padding:0;min-width:0}',
@@ -1300,6 +1306,7 @@ var CleanupPanel = (function () {
     var drag = null;
     var uid = ++instanceCount;
     var tcClient = null, jobSeq = 0;  // the helper client (made on first use) and the number of the current / last job
+    var teachTc = null, teachSeq = 0; // "Teach it your ums": its own helper client (the page's wrapper only has check, run and cancel) and the number of the latest status request
     var wordIdx = null;               // sorted index of the transcript words (wordsBetween)
     var heldMemo = null;              // heldIds(): the ids of the held transcript's cards at every level, for the settings they were found with
 
@@ -1318,6 +1325,9 @@ var CleanupPanel = (function () {
       links: [], known: {}, strays: {}, shadow: {}, pageMade: new WeakSet(), ties: {}, analysisWarnings: [],
       selCard: '', selStart: 0, selA: -1, selB: -1, anchor: -1,
       undo: [], ui: null, cur: -1,
+      learned: null,                 // the helper's trained "my ums" model (Cleanup.scoreFingerprint reads it); null = none yet
+      teachSig: null,                // what the helper was last told about this video's Accept / Reject choices (so nothing is sent twice)
+      teach: { status: null, offline: false, busy: false, label: '', pct: 0, msg: '', said: '', error: '' },
       hits: [], hitCur: -1, query: '',
       lastUserScroll: 0, storageWarned: false, decisionsUnsaved: false, error: '',
       dormant: null, savedTid: '', forVideo: null,
@@ -1468,6 +1478,7 @@ var CleanupPanel = (function () {
       p.minGap = s.minGap; p.keepPause = s.keepPause; p.autoThreshold = s.autoPct / 100;
       p.includeDeadSpace = s.deadSpace; p.includeFillers = s.ums; p.includeStutters = s.stutters; p.includeNonWords = s.nonWords;
       if (s.fillerWords) { p.fillers = parseFillerList(s.fillerWords); }
+      if (S.learned && (!S.ui || S.ui.teachUse !== false)) { p.learned = S.learned; }      // what it learned from the person's own ums (it can only hold a cut back)
       return p;
     }
     function fillerText() { return S.settings.fillerWords || DEFAULT_FILLERS.join(', '); }
@@ -1478,6 +1489,7 @@ var CleanupPanel = (function () {
     function persistDecisions() {
       if (!S.tid) { return; }
       S.decisionsUnsaved = !jset(KEYS.decisions, { tid: S.tid, list: S.decisions });
+      scheduleTeachSync();
     }
     // with no transcript open, the links keep the id they were saved with, so the same file can pick them up again
     function persistKnown() { if (S.dormant) { return; } jset(KEYS.links, { tid: S.tid || S.savedTid || '', map: S.known }); }
@@ -2372,6 +2384,13 @@ var CleanupPanel = (function () {
       E.secRange = h('div', { 'class': 'cp-sec' }, [E.rangeToggle, E.rangeBody]);
       root.appendChild(E.secRange);
 
+      /* 3c. teach it your ums: recordings of the person's own ums, and what their Accept and Reject choices say */
+      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
+      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
+      E.teachBody = buildTeachBody();
+      E.secTeach = h('div', { 'class': 'cp-sec' }, [E.teachToggle, E.teachBody]);
+      root.appendChild(E.secTeach);
+
       /* 4. lists */
       E.lists = {};
       var listsWrap = h('div', { 'class': 'cp-sec' });
@@ -2515,6 +2534,220 @@ var CleanupPanel = (function () {
       return body;
     }
 
+    /* ===========================================================================================
+     * Teach it your ums. The helper keeps a small model of what the person's own ums sound like (fingerprints of sounds, never
+     * audio). It learns from recordings the person points at here, and from their Accept and Reject choices. The engine uses it as
+     * one more piece of evidence, and only to hold a cut back (a sound effect that the speech engines wrote as "um").
+     * ======================================================================================= */
+    var AUDIO_ACCEPT = 'audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+    function buildTeachBody() {
+      var body = h('div', { 'class': 'cp-body cp-teach', hidden: true });
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Teach the tool what YOUR ums sound like, so it stops cutting sound effects that it mistakes for ums. It learns from recordings you point it at and from your Accept and Reject choices (Reject means: this is not an um). Everything stays on this computer, and only numbers that describe each sound are kept, never the audio.' }));
+      E.teachStatus = h('p', { 'class': 'cp-teach-status', role: 'status', 'aria-live': 'polite' });
+      body.appendChild(E.teachStatus);
+      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of your ums' });
+      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of sounds that are not ums' });
+      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
+      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
+      E.teachUmBtn = btn('Choose a recording of your ums', 'cp-btn-primary', function () { E.teachUmFile.click(); }, null, 'One long recording of you saying um, uh, er, hmm ... with a short gap between each');
+      E.teachNotBtn = btn('Choose a recording of sounds that are not ums', '', function () { E.teachNotFile.click(); }, null, 'Sound effects, breaths, clicks, laughs: the sounds that get mistaken for ums');
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachUmBtn, E.teachNotBtn, E.teachUmFile, E.teachNotFile]));
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
+      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
+      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
+      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite' });
+      body.appendChild(E.teachBar);
+      body.appendChild(E.teachMsg);
+      E.teachClips = h('div', { 'class': 'cp-rows' });
+      body.appendChild(E.teachClips);
+      E.teachDecisions = h('p', { 'class': 'cp-sub' });
+      body.appendChild(E.teachDecisions);
+      E.teachUse = h('input', { type: 'checkbox' });
+      on(E.teachUse, 'change', function () {
+        S.ui.teachUse = !!E.teachUse.checked; persistUi();
+        if (S.transcript && S.learned) { applyLearned(); }
+      });
+      E.teachUseWrap = h('label', { 'class': 'cp-check' }, [E.teachUse, h('span', { text: 'Use what it learned when cleaning up' })]);
+      body.appendChild(E.teachUseWrap);
+      E.teachAgain = btn('Check again', 'cp-btn-sm', function () { refreshTeach(true); }, null, 'Ask the helper again what it has learned');
+      E.teachForget = btn('Forget everything it learned', 'cp-btn-sm cp-btn-no', function () { forgetTeach('all'); }, null, 'Delete what it learned from your recordings and your choices');
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachAgain, E.teachForget]));
+      return body;
+    }
+
+    function getTeachClient() {
+      if (teachTc) { return teachTc; }
+      var T = win.TranscriberClient || (typeof TranscriberClient !== 'undefined' ? TranscriberClient : null);
+      if (!T || typeof T.create !== 'function') { return null; }
+      try { teachTc = T.create({ ports: Array.isArray(options.transcriberPorts) && options.transcriberPorts.length ? options.transcriberPorts.slice() : TC_PORTS.slice() }); } catch (e) { teachTc = null; }
+      if (!teachTc || typeof teachTc.teachStatus !== 'function' || typeof teachTc.run !== 'function') { teachTc = null; }
+      return teachTc;
+    }
+    function pctText(x) { return Math.round(100 * num(x, 0)) + '%'; }
+    function teachStatusLine() {
+      var T = S.teach, st = T.status;
+      if (!getTeachClient()) { return 'This build has no helper, so there is nothing to teach.'; }
+      if (T.offline && !st) { return 'The helper is not running, so nothing can be learned right now. Start it (on Windows: double-click the Video Redline icon), then press Check again.'; }
+      if (!st) { return 'Asking the helper what it has learned ...'; }
+      var need = st.needs && st.needs.ums ? st.needs.ums : 10;
+      var line;
+      if (!st.ready) {
+        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums below, or Accept a few ums as they come up.';
+      } else if (st.kind === 'one-class') {
+        line = 'Learned how ' + st.ums + ' of your ums sound, and holds back sounds that look very different. Add a recording of sounds that are not ums to tell it where the line is.';
+      } else {
+        line = 'Learned from ' + st.ums + ' ums and ' + st.notums + ' sounds that are not ums.';
+        if (st.check && typeof st.check.recall === 'number') {
+          line += ' On examples it had not seen it recognised ' + pctText(st.check.recall) + ' of the ums' + (typeof st.check.rejects === 'number' ? ' and kept out ' + pctText(st.check.rejects) + ' of the other sounds' : '') + '.';
+        }
+      }
+      if (T.offline) { line += ' (The helper is not answering right now.)'; }
+      return line;
+    }
+    function renderTeach() {
+      if (!E.teachBody || !S.ui || !S.ui.teach) { return; }
+      var T = S.teach, st = T.status, has = !!getTeachClient();
+      setText(E.teachStatus, teachStatusLine());
+      setText(E.teachMsg, T.error || T.msg || T.said || '');
+      E.teachMsg.className = 'cp-teach-msg' + (T.error ? ' cp-teach-err' : '');
+      E.teachBar.hidden = !T.busy;
+      E.teachFill.style.width = Math.max(0, Math.min(100, T.pct)) + '%';
+      E.teachBar.setAttribute('aria-valuenow', String(Math.round(T.pct)));
+      [E.teachUmBtn, E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
+      E.teachAgain.disabled = !has || T.busy;
+      clearEl(E.teachClips);
+      ((st && st.clips) || []).forEach(function (c) {
+        var txt = c.name + ' · ' + (c.label === 'um' ? 'ums' : 'not ums') + ' · ' + c.sounds + ' ' + plural(c.sounds, 'sound', 'sounds') + (c.ignored ? ' (' + c.ignored + ' left out)' : '');
+        var row = h('div', { 'class': 'cp-row' }, [h('span', { 'class': 'cp-rtext', text: txt, title: txt })]);
+        var b = btn('Forget', 'cp-btn-sm', function () { forgetTeach('clip:' + c.id); }, null, 'Forget what this recording taught it');
+        b.disabled = T.busy;
+        row.appendChild(h('span', { 'class': 'cp-rbtns' }, [b]));
+        E.teachClips.appendChild(row);
+      });
+      var d = st && st.decisions ? st.decisions : null;
+      setText(E.teachDecisions, d && (d.ums || d.notums) ? 'From your Accept and Reject choices in your videos: ' + d.ums + ' ' + plural(d.ums, 'um', 'ums') + ' and ' + d.notums + ' not ' + plural(d.notums, 'um', 'ums') + '.' : '');
+      E.teachUse.checked = S.ui.teachUse !== false;
+      E.teachUse.disabled = !S.learned;
+      E.teachUseWrap.hidden = !(st && st.ready);
+    }
+
+    /** ask the helper what it has learned; with rerun, a changed model is applied to this video's cuts right away */
+    function refreshTeach(rerun) {
+      var tc = getTeachClient();
+      if (!tc) { S.teach.offline = false; renderTeach(); return Promise.resolve(); }
+      var seq = ++teachSeq;
+      return Promise.all([tc.teachStatus(), tc.teachModel()]).then(function (r) {
+        if (destroyed || seq !== teachSeq) { return; }
+        var before = modelKey(S.learned);
+        S.teach.offline = false; S.teach.status = r[0]; S.learned = r[1];
+        renderTeach();
+        if (rerun && S.transcript && modelKey(S.learned) !== before) { applyLearned(); }
+      }, function () {
+        if (destroyed || seq !== teachSeq) { return; }
+        S.teach.offline = true; renderTeach();
+      });
+    }
+    function modelKey(m) { return m && typeof m === 'object' ? [m.kind, m.trained, m.ums, m.notums].join(':') : ''; }
+
+    /** run the analysis again with (or without) the model; the person's Accept and Reject choices are kept */
+    function applyLearned() {
+      if (destroyed || !S.transcript) { return; }
+      var before = counts().pending;
+      runAnalysis(true);
+      S.undo = [];
+      renderAll(true);
+      var after = counts().pending;
+      if (after > before) { toast(after - before + ' more ' + plural(after - before, 'cut waits', 'cuts wait') + ' for your decision now (sounds that do not look like your ums).'); }
+    }
+
+    function startTeach(label, file) {
+      var tc = getTeachClient(), T = S.teach;
+      if (!tc || T.busy || !file) { return; }
+      T.busy = true; T.label = label; T.pct = 0; T.error = ''; T.said = ''; T.msg = 'Sending the recording to the helper ...';
+      renderTeach();
+      var name = String(file.name || 'recording');
+      tc.run(file, { teach: label }, function (pg) {
+        if (destroyed) { return; }
+        T.pct = num(pg && pg.percent, 0);
+        T.msg = pg && pg.phase === 'uploading' ? 'Sending the recording to the helper ...' : (pg && pg.phase === 'finishing' ? 'Finishing ...' : (pg && pg.message ? String(pg.message) : 'Learning the sounds ...'));
+        renderTeach();
+      }).then(function (res) {
+        if (destroyed) { return; }
+        T.busy = false; T.msg = ''; T.error = '';
+        var used = res && res.used ? res.used : 0, ign = res && res.ignored ? res.ignored : 0;
+        T.said = 'Learned from ' + used + ' ' + (label === 'um' ? plural(used, 'um', 'ums') : 'not-um ' + plural(used, 'sound', 'sounds')) + ' in “' + name + '”' + (ign ? ' (' + ign + ' left out because ' + plural(ign, 'it', 'they') + ' looked unlike the rest)' : '') + '.';
+        if (res && res.summary) { T.status = res.summary; }
+        return refreshTeach(true);
+      }, function (err) {
+        if (destroyed) { return; }
+        T.busy = false; T.msg = ''; T.said = '';
+        var code = err && err.code;
+        T.error = code === 'busy' ? 'The helper is busy making a transcript. Try again when it has finished.'
+          : code === 'no-helper' ? 'I cannot find the helper. Start it (on Windows: double-click the Video Redline icon), then try again.'
+          : code === 'cancelled' ? 'Cancelled. Nothing was kept.'
+          : (err && err.message ? String(err.message) : 'That recording could not be used.');
+        renderTeach();
+      });
+    }
+
+    function forgetTeach(what) {
+      var tc = getTeachClient(), T = S.teach;
+      if (!tc || T.busy) { return; }
+      var q = what === 'all' ? 'Forget everything the tool learned about your ums (your recordings and your Accept and Reject choices)?' : 'Forget what this recording taught it?';
+      var ok = true;
+      try { ok = typeof api.confirm === 'function' ? !!api.confirm(q) : true; } catch (e) { ok = true; }
+      if (!ok) { return; }
+      T.said = ''; T.error = '';
+      tc.teachForget(what).then(function (summary) {
+        if (destroyed) { return; }
+        T.status = summary;
+        if (what === 'all') { S.teachSig = null; }
+        return refreshTeach(true);
+      }, function (err) {
+        if (destroyed) { return; }
+        T.error = err && err.message ? String(err.message) : 'The helper could not forget that.';
+        renderTeach();
+      });
+    }
+
+    /** the Accept and Reject choices of this video as examples: an Accepted card is an um, a Rejected one is not. Only sounds
+     *  the helper fingerprinted can teach it. An automatic cut that the person removed counts as "not an um" only when they removed
+     *  a few of them: when they undid most automatic cuts at once ("Undo all automatic cuts", undo of the whole batch) they were
+     *  turning the cleanup down, which says nothing about each sound. */
+    function teachExamples() {
+      var out = [], tr = S.transcript;
+      if (!tr || !Array.isArray(tr.words)) { return out; }
+      var fill = S.candidates.filter(function (c) { return c.kind === 'filler' && c.words && c.words.length === 1; });
+      var autoN = 0, autoRej = 0;
+      fill.forEach(function (c) { if (c.eff === 'auto') { autoN++; if (c.st === 'rejected') { autoRej++; } } });
+      var autoOk = autoRej <= Math.max(3, Math.round(0.25 * autoN));
+      fill.forEach(function (c) {
+        var w = tr.words[c.words[0]];
+        if (!w || !Array.isArray(w.fp)) { return; }
+        if (c.st === 'accepted' && c.eff !== 'auto') { out.push({ label: 'um', fp: w.fp }); }
+        else if (c.st === 'rejected' && (c.eff !== 'auto' || autoOk)) { out.push({ label: 'notum', fp: w.fp }); }
+      });
+      return out;
+    }
+    function teachVideoKey() {
+      var name = safe(function () { return api.getVideoName ? api.getVideoName() : ''; }, '') || '';
+      return String(name) + '|' + num(safe(function () { return api.getDuration(); }, 0), 0).toFixed(3);
+    }
+    function scheduleTeachSync() { if (!destroyed && S.transcript) { later('teachsync', 1500, doTeachSync); } }
+    function doTeachSync() {
+      var tc = getTeachClient();
+      if (!tc || !S.transcript || S.teach.busy) { return; }
+      var ex = teachExamples();
+      if (!ex.length && S.teachSig === null) { return; }               // nothing to tell, and nothing was told before
+      var sig = hashString(JSON.stringify(ex));
+      if (sig === S.teachSig) { return; }
+      var key = teachVideoKey();
+      tc.teachExamples(key, ex).then(function (summary) {
+        if (destroyed) { return; }
+        S.teachSig = sig; S.teach.status = summary; S.teach.offline = false; renderTeach();
+      }, function () { /* the helper is not there right now: the next decision tries again */ });
+    }
+
     function buildRangeBody() {
       var body = h('div', { 'class': 'cp-body cp-form', hidden: true });
       E.rStart = h('input', { type: 'text', 'class': 'cp-in', placeholder: '1:23.45', 'aria-label': 'Start time', autocomplete: 'off', spellcheck: 'false' });
@@ -2539,7 +2772,8 @@ var CleanupPanel = (function () {
     function toggleUi(name) {
       if (name === 'settings') { S.setPin = !settingsOpen(); renderDisclosures(); return; }
       S.ui[name] = !S.ui[name]; persistUi(); renderDisclosures();
-      if (name !== 'range' && name !== 'advanced') { renderLists(); }
+      if (name === 'teach' && S.ui.teach) { refreshTeach(false); }
+      if (name !== 'range' && name !== 'advanced' && name !== 'teach') { renderLists(); }
     }
 
     function renderDisclosures() {
@@ -2555,6 +2789,7 @@ var CleanupPanel = (function () {
       // closed, the one line still names the level: "Cleanup level: Balanced - change"
       setDisc(E.setToggle, E.setBody, so ? 'Settings' : (lv ? 'Cleanup level: ' + lv.label + ' - change' : 'Settings - change'), so);
       setDisc(E.advToggle, E.advBody, 'Advanced', !!S.ui.advanced);
+      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'Teach it your ums', !!S.ui.teach); renderTeach(); }
       setDisc(E.rangeToggle, E.rangeBody, 'Cut a time range', !!S.ui.range);
       var n = listCounts();
       ['applied', 'mine', 'rejected'].forEach(function (k) { setDisc(E.lists[k].toggle, E.lists[k].body, E.lists[k].label, !!S.ui[k], n[k]); });
@@ -3849,6 +4084,7 @@ var CleanupPanel = (function () {
         if (!r || !r.found) { showHelp(token, 'no-helper', r && r.problem, { help: r && r.help }); return; }
         if (!r.ready) { showHelp(token, 'not-ready', r.problem, { help: r.help, checking: r.checking === true }); return; }
         if (r.busy) { showHelp(token, 'busy', r.problem, { help: r.help }); return; }
+        refreshTeach(false);                  // the helper is there: get what it learned from the person's ums ready for the analysis of the new transcript
         runJob(client, file, token);
       });
     }
@@ -4013,7 +4249,8 @@ var CleanupPanel = (function () {
     // chose since); "Advanced" is closed until opened, and that is remembered.
     S.ui = {
       advanced: !!uiRaw.advanced, applied: !!uiRaw.applied, mine: !!uiRaw.mine,
-      rejected: !!uiRaw.rejected, range: uiRaw.uiv >= 2 ? !!uiRaw.range : true, follow: uiRaw.follow !== false, uiv: 4
+      rejected: !!uiRaw.rejected, range: uiRaw.uiv >= 2 ? !!uiRaw.range : true, follow: uiRaw.follow !== false, uiv: 4,
+      teach: !!uiRaw.teach, teachUse: uiRaw.teachUse !== false
     };
     injectStyle();
     host.appendChild(buildSkeleton());
@@ -4060,6 +4297,11 @@ var CleanupPanel = (function () {
       }
       renderAll();
     })();
+    // What the helper has learned from the person's own ums. It is asked for here only when the person has the Teach section open or the
+    // open transcript came from the helper (so the helper has been used on this computer): asking a helper that is not there would
+    // print refused connections in the browser's console. It is also asked for when a transcript is about to be made. A transcript that is
+    // already open is left as it is (nothing changes by itself when a video opens); the model is used by the next analysis.
+    if (S.ui.teach || (S.transcript && S.source && S.source.kind === 'helper')) { later('teachboot', 400, function () { refreshTeach(false); }); }
 
     var ctrl = {
       load: load,
@@ -4121,6 +4363,9 @@ var CleanupPanel = (function () {
           try { var cr = tcClient.cancel(); if (cr && typeof cr.then === 'function') { cr.then(null, function () { /* ignore */ }); } } catch (e) { /* ignore */ }
         }
         jobSeq++; S.job = null;
+        if (S.teach.busy && teachTc && typeof teachTc.cancel === 'function') {          // a recording that is still being learned from is dropped
+          try { var tr0 = teachTc.cancel(); if (tr0 && typeof tr0.then === 'function') { tr0.then(null, function () { /* ignore */ }); } } catch (e) { /* ignore */ }
+        }
         Object.keys(timers).forEach(function (k) { if (timers[k]) { clearTimeout(timers[k]); } });
         offs.forEach(function (f) { try { f(); } catch (e) { /* ignore */ } });
         if (E.root && E.root.parentNode) { E.root.parentNode.removeChild(E.root); }
