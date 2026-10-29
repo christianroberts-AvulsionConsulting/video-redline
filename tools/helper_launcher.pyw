@@ -160,7 +160,8 @@ def main():
             pass
         if TOOLS not in sys.path:
             sys.path.insert(0, TOOLS)
-        os.environ["VRT_BACKGROUND"] = "1"           # tells a newer helper it has no window (its banner then says so); an older one ignores it        import vrt_server                            # 5. the helper itself (standard library only)
+        os.environ["VRT_BACKGROUND"] = "1"           # tells a newer helper it has no window (its banner then says so); an older one ignores it
+        import vrt_server                           # 5. the helper itself (standard library only)
         rc = vrt_server.main([])                     #    explicit empty list: it never reads sys.argv. Returns when the helper stops.
         if rc == 10:
             log.say("A helper was already running. Nothing to do.")
