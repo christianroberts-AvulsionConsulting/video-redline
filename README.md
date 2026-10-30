@@ -145,7 +145,7 @@ Laid out like a video editor:
    | custom | Type your own |
 
 5. To show where a visual should sit, **drag on the video** to draw a box. Drag the box to move it, drag its corners to resize it, and click the × to delete it. The box only shows while the playhead is inside that marker.
-6. Click **Export for Claude**. Two files land in your Downloads folder: `<video name>-review.md` and `<video name>-review.json`. Give both to Claude. (Your browser may ask whether to allow multiple downloads. Say yes.) **Copy markdown** puts the same notes on your clipboard instead.
+6. Click **Export for Claude**. Two files land in your Downloads folder: `<video name>-review.md` and `<video name>-review.json`. Give both to Claude. (Your browser may ask whether to allow multiple downloads. Say yes.) **Copy markdown** puts the same notes on your clipboard instead. **Prompt for Claude** (next to it) puts a ready-made prompt on your clipboard, for when Claude does not pick the video up by itself: paste it into Claude. It names this video and says where your work stands. With no drafts from Claude yet, it asks for a first pass (a transcript and a draft of visual markers that you open with **File, Load session from file**). Once Claude's drafts are in your markers, it asks Claude to compare them with what you kept, changed and deleted, and to learn from that. Nothing is sent anywhere by the page.
 
 ### Zooming the timeline
 

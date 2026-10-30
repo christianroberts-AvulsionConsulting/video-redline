@@ -121,6 +121,59 @@ function copyMarkdown() {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Markdown copied. Paste it to Claude.'), fallback);
   else fallback();
 }
+/* ---------- Prompt for Claude ----------
+   A fallback for when Claude does not pick the video up by itself: one button puts a ready-made prompt on the clipboard.
+   Nothing from Claude in the markers yet: it asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin).
+   Markers drafted by Claude are there (origin.by === 'claude'): it asks Claude to compare them with what was kept, changed and deleted and to learn from it. */
+const PROMPT_MAX_NOTES = 30000;                        // longer notes are not pasted into the prompt; Export for Claude carries them instead
+function buildClaudePrompt() {
+  const kinds = {}; markers.forEach(m => { const t = typeLabel(m); kinds[t] = (kinds[t] || 0) + 1; });
+  const drafted = sorted().filter(m => m.origin && m.origin.by === 'claude');
+  const haveWords = !!spokenAt({ start: 0, end: meta.duration });
+  const now = markers.length
+    ? markers.length + ' marker' + (markers.length === 1 ? '' : 's') + ' (' + Object.keys(kinds).map(t => kinds[t] + ' ' + t).join(', ') + ')' + (drafted.length ? ', ' + drafted.length + ' of them drafted by you earlier' : '')
+    : 'no markers yet';
+  const L = [];
+  L.push(drafted.length ? 'I have reviewed your draft for a video in Video Redline. Please learn from what I did.' : 'Please make the first pass of an edit for a video I am marking up in Video Redline.', '');
+  L.push('VIDEO', 'Name: ' + meta.name, 'Picture: ' + meta.w + 'x' + meta.h + ', ' + fmtFps(fps) + ' fps', 'Length: ' + tc(meta.duration) + ' (' + meta.duration.toFixed(3) + ' s)',
+    'Right now: ' + now + '. A transcript is ' + (haveWords ? 'loaded in the Cleanup tab.' : 'not loaded in the Cleanup tab yet.'), '');
+  const notes = buildMarkdown();
+  if (drafted.length) {
+    L.push('WHAT I WANT YOU TO DO',
+      '1. Compare my current markers (below) with the draft you saved: which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.',
+      '2. Tell me the patterns in a few plain lines, for example "you delete recap lists" or "you move cards half a second later".',
+      '3. Update your notes about my taste, so the next first pass needs less fixing. Do not change my markers or the video.', '',
+      'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.',
+      'If you have the JSON from Export for Claude, use it: it carries your origin tags and exact values.', '',
+      'MY MARKERS NOW', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
+    return L.join('\n');
+  }
+  L.push('WHAT I WANT YOU TO DO',
+    '1. Get a transcript with word times for this video. Use the Video Redline helper (tools/transcribe.py in the Video Redline folder) or any speech to text that runs on this computer. The video must not be uploaded anywhere.',
+    '2. Look at a few frames first, so you know what is already on screen. Do not repeat text that is already in the picture.',
+    '3. Draft the visual markers a viewer would need: lists, steps, diagrams, callouts, shortcuts, big numbers, quotes, title cards, lower thirds. A spoken keyboard shortcut, a list of steps or rules, a term being defined, a number being read out and a "watch next" are the clearest cases. Skip anything that would only decorate.',
+    '4. Keep visuals away from dead air and ums that will be cut. Give each visual a box, clear of whatever the speaker is pointing at.',
+    '5. Save the draft as ONE Video Redline session file (.json, format below) next to the video and tell me the path. I will open it with File, Load session from file, then accept, reject or edit each marker.', '',
+    'HOW TO TAG YOUR DRAFT',
+    'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
+    'FILE FORMAT',
+    '{ "tool": "video-review", "version": 2,',
+    '  "video": { "name": ' + JSON.stringify(meta.name) + ', "width": ' + meta.w + ', "height": ' + meta.h + ', "fps": ' + fmtFps(fps) + ', "duration": ' + +meta.duration.toFixed(3) + ' },',
+    '  "markers": [ { "type": "visual", "start": 12.0, "end": 18.5, "comment": "what it is and why, for the editor",',
+    '      "boxes": [ { "x": 960, "y": 300, "w": 800, "h": 400 } ],',
+    '      "visual": { "kind": "callout", "content": { "title": "Pro tip", "body": "Press F4 to switch between absolute and relative references." }, "style": "<a style id>", "textBy": "me" },',
+    '      "origin": { "by": "claude", "candidateId": "v1", "reason": "...", "confidence": 0.7 } } ],',
+    '  "styles": [] }',
+    'Times are seconds from the start of the video. Boxes are in video pixels from the top left corner. "type" is "visual" for most kinds, "list" for list and steps, "diagram" for a diagram, or "note" for a comment with no edit.');
+  if (typeof VIS !== 'undefined') L.push('Visual kinds: ' + VIS.KINDS.map(k => k.id).join(', ') + '. Each takes a "title" and a "body" (one item per line; "A -> B -> C" for a diagram; "Windows: Ctrl + T" on one line and "Mac: ⌘ + T" on the next for a shortcut).',
+    'Style ids (use one style for the whole video unless I say otherwise): ' + allStyles().map(s => s.id).join(', ') + '.');
+  if (markers.length) L.push('', 'MARKERS I ALREADY HAVE (keep them in the file exactly as they are, and keep your visuals off them)', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
+  return L.join('\n');
+}
+function copyClaudePrompt() {
+  if (needVideo()) return;
+  copyPlainText(buildClaudePrompt(), 'Prompt copied. Paste it into Claude.', 'Could not copy. Use Export for Claude instead.');
+}
 function saveSessionFile() {                           // File, Download session file (File, Save session is in 07-sessions.js: it saves into the sessions folder)
   if (needVideo()) return;
   download(baseName() + '-session.json', JSON.stringify(buildJson({ keepHidden: true }), null, 2), 'application/json');

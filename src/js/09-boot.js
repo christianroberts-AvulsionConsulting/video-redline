@@ -127,6 +127,7 @@ function boot() {
   $('btnOpen2').addEventListener('click', openVideoPicker);
   $('btnFile').addEventListener('click', openFileMenu);
   $('btnCopy').addEventListener('click', copyMarkdown);
+  $('btnPrompt').addEventListener('click', copyClaudePrompt);
   $('btnExport').addEventListener('click', exportForClaude);
   $('btnUndo').addEventListener('click', undo);
   $('btnRedo').addEventListener('click', redo);
