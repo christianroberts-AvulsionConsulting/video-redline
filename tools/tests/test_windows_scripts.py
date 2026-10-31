@@ -1053,10 +1053,15 @@ class MacVersionCheckTests(unittest.TestCase):
                 f.write(text)
 
     def run_setup(self, arch, macos, **extra):
+        stubs = os.path.join(self.root, "bin")
         env = dict(os.environ, VRT_NO_PAUSE="1", STUB_ARCH=arch, STUB_MACOS=macos, HOME=os.path.join(self.root, "home").replace("\\", "/"),
-                   PATH=os.path.join(self.root, "bin") + os.pathsep + os.environ.get("PATH", ""), **extra)
-        r = subprocess.run([find_bash(), os.path.join(self.tools, "setup-mac.command").replace("\\", "/")], input=b"", stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, env=env, timeout=120)
+                   VRT_STUB_BIN=stubs, PATH=stubs + os.pathsep + os.environ.get("PATH", ""), **extra)
+        # Git for Windows' bin\bash.exe (the one found when the tests run from PowerShell) puts its own folders ahead of the inherited PATH, so
+        # its real curl would beat the stand-in and the "nothing can be downloaded" tests would use the network. Put the stand-ins first again
+        # inside bash, then run the script (on a Mac or Linux there is no cygpath and the folder is already a plain path).
+        first = 'PATH="$(cygpath -u "$VRT_STUB_BIN" 2>/dev/null || echo "$VRT_STUB_BIN"):$PATH"; export PATH; exec bash "$0"'
+        r = subprocess.run([find_bash(), "-c", first, os.path.join(self.tools, "setup-mac.command").replace("\\", "/")], input=b"",
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, timeout=120)
         out = r.stdout.decode("utf-8", errors="replace")
         return r.returncode, out, " ".join(out.split())
 

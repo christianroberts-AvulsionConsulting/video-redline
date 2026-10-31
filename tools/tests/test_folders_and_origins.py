@@ -1342,7 +1342,11 @@ class LauncherTextTests(unittest.TestCase):
         easy = section.index("- **Windows, the Video Redline icon (the easy way):** double-click the **Video Redline** icon on your Desktop")
         by_hand = section.index("- **Windows, by hand (always works, and the way if you would rather not have the icon):** double-click **`start-helper-windows.bat`**")
         self.assertLess(easy, by_hand)
-        self.assertLess(by_hand, section.index("- **Mac:** open **Terminal**"))
+        # (Mac launcher: the Mac has its own easy way, the Video Redline app, ahead of the by-hand Terminal route)
+        mac_app = section.index("- **Mac, the Video Redline app (the easy way):** double-click the **Video Redline** app")
+        mac_hand = section.index("- **Mac, by hand (always works):** open **Terminal**")
+        self.assertLess(by_hand, mac_app)
+        self.assertLess(mac_app, mac_hand)
         # the icon starts the helper if needed and opens the page; no icon yet: setup-autostart-windows.bat once (it adds the icon and makes the
         # helper start by itself at every sign-in); the icon was deleted: add-desktop-icon-windows.bat
         way = section[easy:by_hand]
@@ -1406,7 +1410,10 @@ class LauncherTextTests(unittest.TestCase):
             self.assertIn("type bash and a space", text, name)
             for n, line in enumerate(text.splitlines(), 1):
                 if re.search(r"ouble-click", line):
-                    self.assertTrue("zip file" in line or "does not work" in line, "%s line %d: %s" % (name, n, line.strip()))
+                    # (Mac launcher: the ALL DONE screen sends people to the Video Redline app, which is not a .command file, and says not to
+                    # double-click video-redline.html; the check below still forbids double-clicking a .command file)
+                    about_app = re.search(r"(?i)\bapp\b|video-redline\.html", line)
+                    self.assertTrue("zip file" in line or "does not work" in line or about_app, "%s line %d: %s" % (name, n, line.strip()))
         # nowhere may a .command file be named as something to double-click (only "do not double-click it" is allowed)
         wrong = re.compile(r"(?i)(?<!not )double-click(?:ing)?\s+(?:the file\s+)?[*`\"]*(?:setup|start-helper|transcribe)-mac\.command")
         for name in ["README.md", "README-helper-security.md", "vrt_server.py", "vrt_env.py", "transcribe.py", "setup-windows.bat",
@@ -1440,10 +1447,16 @@ class LauncherTextTests(unittest.TestCase):
             self.assertIn(want, done)
         sh = read_text("setup-mac.command")
         done = sh[sh.index("ALL DONE."):]
+        # (Mac launcher: when setup made the Video Redline app the screen sends people to it; if it could not be made, the Terminal route
+        # with start-helper-mac.command is the fallback. The drag-and-drop transcript part after both is unchanged.)
+        app, fallback = done.split("\nelse\n", 1)
+        self.assertRegex(app, r'double-click the \\"Video Redline\\" app')
+        for want in ("Create transcript and find cuts", "stop-helper-mac.command"):
+            self.assertIn(want, app)
         for want in ("Create transcript and find cuts", "start-helper-mac.command", "type bash and a space", "transcribe-mac.command",
                      "Leave that window", "drag your"):
-            self.assertIn(want, done)
-        self.assertNotIn("ouble-click", done)
+            self.assertIn(want, fallback)
+        self.assertNotIn("ouble-click", fallback)
 
     def test_install_log_is_not_mentioned_in_any_shipped_file(self):
         needle = "install" + "-log"
@@ -1514,7 +1527,7 @@ class ReadmeButtonSectionTests(unittest.TestCase):
             self.assertIn(want, bullet)
         self.assertNotIn("if your tools folder has that file", bullet)
         # that file stops only a helper of its own folder: a helper that runs from another copy of the tools needs the file of that copy
-        self.assertIn("only stops a helper that runs from the same tools folder", bullet)
+        self.assertIn("only stop a helper that runs from the same tools folder", bullet)       # (both stop-helper files, since the Mac one)
         self.assertIn("more than one copy of the tools", bullet)
         bat = read_text("start-helper-windows.bat")
         self.assertIn("the helper is already running (in another window, or hidden).", bat)
