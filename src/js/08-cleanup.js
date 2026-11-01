@@ -368,16 +368,22 @@ function makeHelperAutostart(Base, opts) {
 const HelperAutostart = typeof TranscriberClient !== 'undefined' ? makeHelperAutostart(TranscriberClient, { say: (m, ms) => toast(m, ms), hide: () => toastEl.classList.remove('show') }) : undefined;
 
 /* ---------- the panel in the left tabs ---------- */
+let teachPanel = null;                          // with no video open: a panel that shows only "Teach it your ums" (never the review panel, so `cleanupPanel` stays null and nothing else treats it as one)
 function buildCleanupPanel() {
   const host = $('cleanupHost');
   if (cleanupPanel) { try { cleanupPanel.destroy(); } catch (e) { /* already gone */ } cleanupPanel = null; }
+  if (teachPanel) { try { teachPanel.destroy(); } catch (e) { /* already gone */ } teachPanel = null; }
   host.textContent = '';
+  host.classList.toggle('idle', !meta);
   updateCleanupBadge();
   if (!HAS_CLEANUP) { host.appendChild(h('div', { class: 'pane-note', text: 'The audio cleanup module did not load.' })); return; }
   if (!meta) {
     host.appendChild(h('div', { class: 'empty' }, h('span', { class: 'empty-ic', 'data-icon': 'scissors' }), h('b', { text: 'Audio cleanup' }),
       h('p', { text: 'Open a video first. Then open a transcript of it, and this tab finds dead air, ums, stutters and false starts and turns them into cut markers for you to review.' })));
     mountIcons(host);
+    // Teaching needs no video: point it at a recording of your ums any time. Nothing is saved for "no video" (the storage is switched off here).
+    try { teachPanel = CleanupPanel.create({ host, api: Object.assign({}, cleanupApi, { storage: { get: () => null, set: () => {} } }), Cleanup, TranscriberClient: HelperAutostart, transcriberPorts: helperSeam().ports, teachOnly: true }); }
+    catch (e) { teachPanel = null; }
     return;
   }
   try { cleanupPanel = CleanupPanel.create({ host, api: cleanupApi, Cleanup, TranscriberClient: HelperAutostart, transcriberPorts: helperSeam().ports }); }

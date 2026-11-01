@@ -120,6 +120,10 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 #paneCleanup .pane-body { padding: 0; overflow: hidden; position: relative; }
 #cleanupHost { position: absolute; inset: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #3a3f49 transparent; }
 #cleanupHost .cp-root { scrollbar-width: thin; scrollbar-color: #3a3f49 transparent; }
+/* no video open: the "open a video" card takes the free space, and "Teach it your ums" sits under it at the bottom */
+#cleanupHost.idle { display: flex; flex-direction: column; }
+#cleanupHost.idle > .empty { margin: auto; }
+#cleanupHost.idle > .cp-root { flex: none; }
 /* the global form-box rule above is more specific than the panel's own .cp-in: give the panel its own look back (a border you can see, and its smaller boxes) */
 .cp-root .cp-in, .cp-root .cp-in:hover { border-color: var(--cp-in-line, #6b717d); }
 .cp-root .cp-in { padding: 3px 6px; border-radius: 6px; background: var(--bg); }
@@ -764,7 +768,8 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
     <button class="btn" id="btnOpen" data-icon="folder-open" title="Open a video" aria-label="Open video"><span class="lbl">Open video</span></button>
     <button class="btn ghost" id="btnFile" data-icon="chevron-down" aria-haspopup="menu" title="File menu: save or load a session" aria-label="File menu"><span class="lbl">File</span></button>
     <button class="btn" id="btnCopy" data-icon="copy" title="Copy the markdown notes to the clipboard"><span class="lbl">Copy markdown</span></button>
-    <button class="btn" id="btnPrompt" data-icon="sparkles" title="Copy a ready-made prompt to paste into Claude: this video, where your work stands, and what to do next"><span class="lbl">Prompt for Claude</span></button>
+    <button class="btn" id="btnPromptEdit" data-icon="sparkles" title="Prompt for Claude to edit: copies a ready-made prompt that asks Claude for a first pass (transcript, cuts and visual markers) on this video"><span class="lbl">Prompt: Edit</span></button>
+    <button class="btn" id="btnPromptTrain" data-icon="lightbulb" title="Prompt for Claude to train: copies a ready-made prompt that asks Claude to compare its draft with what you kept, changed and deleted, and learn from it"><span class="lbl">Prompt: Train</span></button>
     <button class="btn primary" id="btnExport" data-icon="download" title="Download the markdown and JSON files for Claude"><span class="lbl">Export for Claude</span></button>
     <span class="vsep"></span>
     <button class="btn icon ghost" id="btnPanelL" data-icon="panel-left" title="Show or hide the left panel"></button>
@@ -8730,6 +8735,16 @@ var CleanupPanel = (function () {
     '.cp-teach-err{color:var(--danger,#ff5d5d)}',
     '.cp-teach .cp-prog{margin:6px 0}',
     '.cp-teach .cp-check{margin-top:8px}',
+    /* the teach section is pinned to the bottom of the panel, with its main button always in view; the details fold under "More" */
+    '.cp-sec-teach{position:sticky;bottom:0;z-index:3;margin-top:auto;border-top:1px solid var(--line,#33363d);border-bottom:0;background:var(--panel,#1d1f23);box-shadow:0 -10px 14px -10px rgba(0,0,0,.55)}',
+    '.cp-teach-head .cp-disc{width:auto;flex:none;font-weight:400;color:var(--muted,#9aa0ab)}',
+    '.cp-sec-teach .cp-teach-go{width:100%;margin-top:2px}',
+    '.cp-sec-teach>.cp-prog{margin:8px 0 2px}',
+    '.cp-sec-teach>.cp-teach-msg{min-height:0;margin:6px 0 0}',
+    '.cp-teach-more{max-height:min(46vh,360px);overflow-x:hidden;overflow-y:auto}',
+    /* with no video open there is no review to show: only the teach section (the page keeps its own "open a video" card above it) */
+    '.cp-teachonly{height:auto;overflow:visible}',
+    '.cp-teachonly>*:not(.cp-sec-teach){display:none!important}',
     '.cp-form-msg.cp-okmsg{color:var(--ok,#3ecf8e)}',
     /* cleanup level: one compact segmented control (real radio buttons) and one help line for the chosen level */
     '.cp-level{border:0;margin:0;padding:0;min-width:0}',
@@ -9803,7 +9818,7 @@ var CleanupPanel = (function () {
      * rendering: skeleton
      * ======================================================================================= */
     function buildSkeleton() {
-      var root = h('div', { 'class': 'cp-root', tabindex: '-1', role: 'region', 'aria-label': 'Audio cleanup' });
+      var root = h('div', { 'class': 'cp-root' + (options.teachOnly ? ' cp-teachonly' : ''), tabindex: '-1', role: 'region', 'aria-label': options.teachOnly ? 'Teach it your ums' : 'Audio cleanup' });
       E.root = root;
 
       /* 1. header */
@@ -9881,12 +9896,7 @@ var CleanupPanel = (function () {
       E.secRange = h('div', { 'class': 'cp-sec' }, [E.rangeToggle, E.rangeBody]);
       root.appendChild(E.secRange);
 
-      /* 3c. teach it your ums: recordings of the person's own ums, and what their Accept and Reject choices say */
-      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
-      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
-      E.teachBody = buildTeachBody();
-      E.secTeach = h('div', { 'class': 'cp-sec' }, [E.teachToggle, E.teachBody]);
-      root.appendChild(E.secTeach);
+      /* (3c, teach it your ums, is the last section: see below) */
 
       /* 4. lists */
       E.lists = {};
@@ -9951,6 +9961,18 @@ var CleanupPanel = (function () {
         h('p', { 'class': 'cp-hint', text: 'Click a word to jump there. Drag, or Shift-click, to select words, then press X to cut them. Dotted words need a decision; struck-through words are cut.' })
       ]);
       root.appendChild(E.secTx);
+
+      /* 6. teach it your ums: pinned to the bottom, there with or without a transcript (and, in teachOnly mode, without a video). The main
+         button, the progress bar and the helper's answer are always in view; the rest (what to record, sounds that are not ums,
+         what it learned, forget) folds under "More". */
+      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
+      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
+      E.teachBody = buildTeachBody();
+      E.secTeach = h('div', { 'class': 'cp-sec cp-sec-teach' }, [
+        h('div', { 'class': 'cp-h cp-teach-head' }, [h('h3', { 'class': 'cp-title', text: 'Teach it your ums' }), E.teachToggle]),
+        E.teachUmBtn, E.teachUmFile, E.teachNotFile, E.teachBar, E.teachMsg, E.teachBody
+      ]);
+      root.appendChild(E.secTeach);
 
       wireTranscriptEvents();
       wireRootEvents(root);
@@ -10037,24 +10059,25 @@ var CleanupPanel = (function () {
      * one more piece of evidence, and only to hold a cut back (a sound effect that the speech engines wrote as "um").
      * ======================================================================================= */
     var AUDIO_ACCEPT = 'audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+    /** Builds the main button, the file pickers, the progress bar and the message (the section puts them in view all the time) and returns
+     *  the folded part: what to record, the sounds that are not ums, what it learned and forget. */
     function buildTeachBody() {
-      var body = h('div', { 'class': 'cp-body cp-teach', hidden: true });
+      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, tabindex: '-1', 'aria-label': 'A video or audio recording of your ums' });
+      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, tabindex: '-1', 'aria-label': 'A video or audio recording of sounds that are not ums' });
+      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
+      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
+      E.teachUmBtn = btn('Choose a video or audio of your ums…', 'cp-btn-primary cp-teach-go', function () { E.teachUmFile.click(); }, 'upload', 'Point it at a recording of you saying um, uh, er, hmm ... with a short gap between each. A video works too: only its sound is used.');
+      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
+      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
+      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite', hidden: true });
+
+      var body = h('div', { 'class': 'cp-body cp-teach cp-teach-more', hidden: true });
       body.appendChild(h('p', { 'class': 'cp-sub', text: 'Teach the tool what YOUR ums sound like, so it stops cutting sound effects that it mistakes for ums. It learns from recordings you point it at and from your Accept and Reject choices (Reject means: this is not an um). Everything stays on this computer, and only numbers that describe each sound are kept, never the audio.' }));
       E.teachStatus = h('p', { 'class': 'cp-teach-status', role: 'status', 'aria-live': 'polite' });
       body.appendChild(E.teachStatus);
-      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of your ums' });
-      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of sounds that are not ums' });
-      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
-      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
-      E.teachUmBtn = btn('Choose a recording of your ums', 'cp-btn-primary', function () { E.teachUmFile.click(); }, null, 'One long recording of you saying um, uh, er, hmm ... with a short gap between each');
       E.teachNotBtn = btn('Choose a recording of sounds that are not ums', '', function () { E.teachNotFile.click(); }, null, 'Sound effects, breaths, clicks, laughs: the sounds that get mistaken for ums');
-      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachUmBtn, E.teachNotBtn, E.teachUmFile, E.teachNotFile]));
-      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
-      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
-      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
-      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite' });
-      body.appendChild(E.teachBar);
-      body.appendChild(E.teachMsg);
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachNotBtn]));
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. A video works too (only its sound is used), but it should be just the ums, not a whole talk. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
       E.teachClips = h('div', { 'class': 'cp-rows' });
       body.appendChild(E.teachClips);
       E.teachDecisions = h('p', { 'class': 'cp-sub' });
@@ -10089,7 +10112,7 @@ var CleanupPanel = (function () {
       var need = st.needs && st.needs.ums ? st.needs.ums : 10;
       var line;
       if (!st.ready) {
-        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums below, or Accept a few ums as they come up.';
+        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums with the button above, or Accept a few ums as they come up.';
       } else if (st.kind === 'one-class') {
         line = 'Learned how ' + st.ums + ' of your ums sound, and holds back sounds that look very different. Add a recording of sounds that are not ums to tell it where the line is.';
       } else {
@@ -10102,15 +10125,21 @@ var CleanupPanel = (function () {
       return line;
     }
     function renderTeach() {
-      if (!E.teachBody || !S.ui || !S.ui.teach) { return; }
+      if (!E.teachBody || !S.ui) { return; }
       var T = S.teach, st = T.status, has = !!getTeachClient();
-      setText(E.teachStatus, teachStatusLine());
-      setText(E.teachMsg, T.error || T.msg || T.said || '');
+      // always in view, folded or not: the main button, the progress bar and the answer (with no helper in this build, the reason)
+      var said = T.error || T.msg || T.said || (has ? '' : teachStatusLine());
+      setText(E.teachMsg, said);
+      E.teachMsg.hidden = !said;
       E.teachMsg.className = 'cp-teach-msg' + (T.error ? ' cp-teach-err' : '');
       E.teachBar.hidden = !T.busy;
       E.teachFill.style.width = Math.max(0, Math.min(100, T.pct)) + '%';
       E.teachBar.setAttribute('aria-valuenow', String(Math.round(T.pct)));
-      [E.teachUmBtn, E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
+      E.teachUmBtn.disabled = !has || T.busy;
+      if (!S.ui.teach) { return; }
+      // the folded part, only while it is open
+      setText(E.teachStatus, teachStatusLine());
+      [E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
       E.teachAgain.disabled = !has || T.busy;
       clearEl(E.teachClips);
       ((st && st.clips) || []).forEach(function (c) {
@@ -10286,7 +10315,7 @@ var CleanupPanel = (function () {
       // closed, the one line still names the level: "Cleanup level: Balanced - change"
       setDisc(E.setToggle, E.setBody, so ? 'Settings' : (lv ? 'Cleanup level: ' + lv.label + ' - change' : 'Settings - change'), so);
       setDisc(E.advToggle, E.advBody, 'Advanced', !!S.ui.advanced);
-      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'Teach it your ums', !!S.ui.teach); renderTeach(); }
+      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'More', !!S.ui.teach); renderTeach(); }
       setDisc(E.rangeToggle, E.rangeBody, 'Cut a time range', !!S.ui.range);
       var n = listCounts();
       ['applied', 'mine', 'rejected'].forEach(function (k) { setDisc(E.lists[k].toggle, E.lists[k].body, E.lists[k].label, !!S.ui[k], n[k]); });
@@ -11761,6 +11790,7 @@ var CleanupPanel = (function () {
 
     /* restore the last session */
     (function restore() {
+      if (options.teachOnly) { renderAll(); return; }       // no video: nothing to restore, and nothing of it is read or written
       var stored = jget(KEYS.transcript);
       var lk = jget(KEYS.links);
       var dec = jget(KEYS.decisions);
@@ -13764,12 +13794,15 @@ function copyMarkdown() {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Markdown copied. Paste it to Claude.'), fallback);
   else fallback();
 }
-/* ---------- Prompt for Claude ----------
-   A fallback for when Claude does not pick the video up by itself: one button puts a ready-made prompt on the clipboard.
-   Nothing from Claude in the markers yet: it asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin).
-   Markers drafted by Claude are there (origin.by === 'claude'): it asks Claude to compare them with what was kept, changed and deleted and to learn from it. */
+/* ---------- Prompts for Claude ----------
+   A fallback for when Claude does not pick the video up by itself: two buttons put a ready-made prompt on the clipboard.
+   Edit ('edit'): asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin). Markers that Claude drafted
+   earlier (origin.by === 'claude') are kept as they are, and new drafts are numbered after them.
+   Train ('train'): asks Claude to compare its draft with what was kept, changed and deleted, and to learn from it. When none of Claude's drafts are left
+   in the markers, the prompt says so (they were all deleted, or this video was never drafted). */
 const PROMPT_MAX_NOTES = 30000;                        // longer notes are not pasted into the prompt; Export for Claude carries them instead
-function buildClaudePrompt() {
+function buildClaudePrompt(mode) {
+  const train = mode === 'train';
   const kinds = {}; markers.forEach(m => { const t = typeLabel(m); kinds[t] = (kinds[t] || 0) + 1; });
   const drafted = sorted().filter(m => m.origin && m.origin.by === 'claude');
   const haveWords = !!spokenAt({ start: 0, end: meta.duration });
@@ -13777,16 +13810,18 @@ function buildClaudePrompt() {
     ? markers.length + ' marker' + (markers.length === 1 ? '' : 's') + ' (' + Object.keys(kinds).map(t => kinds[t] + ' ' + t).join(', ') + ')' + (drafted.length ? ', ' + drafted.length + ' of them drafted by you earlier' : '')
     : 'no markers yet';
   const L = [];
-  L.push(drafted.length ? 'I have reviewed your draft for a video in Video Redline. Please learn from what I did.' : 'Please make the first pass of an edit for a video I am marking up in Video Redline.', '');
+  L.push(train
+    ? (drafted.length ? 'I have reviewed your draft for a video in Video Redline. Please learn from what I did.' : 'I have been editing a video in Video Redline. Please learn from what I did.')
+    : (drafted.length ? 'Please make another pass of the edit for a video I am marking up in Video Redline.' : 'Please make the first pass of an edit for a video I am marking up in Video Redline.'), '');
   L.push('VIDEO', 'Name: ' + meta.name, 'Picture: ' + meta.w + 'x' + meta.h + ', ' + fmtFps(fps) + ' fps', 'Length: ' + tc(meta.duration) + ' (' + meta.duration.toFixed(3) + ' s)',
     'Right now: ' + now + '. A transcript is ' + (haveWords ? 'loaded in the Cleanup tab.' : 'not loaded in the Cleanup tab yet.'), '');
   const notes = buildMarkdown();
-  if (drafted.length) {
+  if (train) {
     L.push('WHAT I WANT YOU TO DO',
-      '1. Compare my current markers (below) with the draft you saved: which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.',
+      '1. Compare my current markers (below) with the draft you saved' + (drafted.length ? '' : ' for this video, if you have one') + ': which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.' + (drafted.length ? '' : ' If you have no saved draft for this video, say so, and learn only from the markers I made myself and the cuts I accepted.'),
       '2. Tell me the patterns in a few plain lines, for example "you delete recap lists" or "you move cards half a second later".',
       '3. Update your notes about my taste, so the next first pass needs less fixing. Do not change my markers or the video.', '',
-      'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.',
+      drafted.length ? 'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.' : 'None of your drafts are in my markers: I deleted them all, or you never drafted this video.',
       'If you have the JSON from Export for Claude, use it: it carries your origin tags and exact values.', '',
       'MY MARKERS NOW', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
     return L.join('\n');
@@ -13798,7 +13833,7 @@ function buildClaudePrompt() {
     '4. Keep visuals away from dead air and ums that will be cut. Give each visual a box, clear of whatever the speaker is pointing at.',
     '5. Save the draft as ONE Video Redline session file (.json, format below) next to the video and tell me the path. I will open it with File, Load session from file, then accept, reject or edit each marker.', '',
     'HOW TO TAG YOUR DRAFT',
-    'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
+    'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on' + (drafted.length ? '; your earlier drafts already use ' + drafted.map(m => m.origin.candidateId).join(', ') + ', so number new ones after those' : '') + '). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
     'FILE FORMAT',
     '{ "tool": "video-review", "version": 2,',
     '  "video": { "name": ' + JSON.stringify(meta.name) + ', "width": ' + meta.w + ', "height": ' + meta.h + ', "fps": ' + fmtFps(fps) + ', "duration": ' + +meta.duration.toFixed(3) + ' },',
@@ -13813,9 +13848,11 @@ function buildClaudePrompt() {
   if (markers.length) L.push('', 'MARKERS I ALREADY HAVE (keep them in the file exactly as they are, and keep your visuals off them)', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
   return L.join('\n');
 }
-function copyClaudePrompt() {
+function copyClaudePrompt(mode) {
   if (needVideo()) return;
-  copyPlainText(buildClaudePrompt(), 'Prompt copied. Paste it into Claude.', 'Could not copy. Use Export for Claude instead.');
+  const train = mode === 'train';
+  if (train && !markers.length) { toast('No markers yet, so Claude has nothing to learn from. Review the cuts and add your own markers first.', 5000); return; }
+  copyPlainText(buildClaudePrompt(mode), (train ? 'Prompt to train Claude copied.' : 'Prompt to edit copied.') + ' Paste it into Claude.', 'Could not copy. Use Export for Claude instead.');
 }
 function saveSessionFile() {                           // File, Download session file (File, Save session is in 07-sessions.js: it saves into the sessions folder)
   if (needVideo()) return;
@@ -14643,16 +14680,22 @@ function makeHelperAutostart(Base, opts) {
 const HelperAutostart = typeof TranscriberClient !== 'undefined' ? makeHelperAutostart(TranscriberClient, { say: (m, ms) => toast(m, ms), hide: () => toastEl.classList.remove('show') }) : undefined;
 
 /* ---------- the panel in the left tabs ---------- */
+let teachPanel = null;                          // with no video open: a panel that shows only "Teach it your ums" (never the review panel, so `cleanupPanel` stays null and nothing else treats it as one)
 function buildCleanupPanel() {
   const host = $('cleanupHost');
   if (cleanupPanel) { try { cleanupPanel.destroy(); } catch (e) { /* already gone */ } cleanupPanel = null; }
+  if (teachPanel) { try { teachPanel.destroy(); } catch (e) { /* already gone */ } teachPanel = null; }
   host.textContent = '';
+  host.classList.toggle('idle', !meta);
   updateCleanupBadge();
   if (!HAS_CLEANUP) { host.appendChild(h('div', { class: 'pane-note', text: 'The audio cleanup module did not load.' })); return; }
   if (!meta) {
     host.appendChild(h('div', { class: 'empty' }, h('span', { class: 'empty-ic', 'data-icon': 'scissors' }), h('b', { text: 'Audio cleanup' }),
       h('p', { text: 'Open a video first. Then open a transcript of it, and this tab finds dead air, ums, stutters and false starts and turns them into cut markers for you to review.' })));
     mountIcons(host);
+    // Teaching needs no video: point it at a recording of your ums any time. Nothing is saved for "no video" (the storage is switched off here).
+    try { teachPanel = CleanupPanel.create({ host, api: Object.assign({}, cleanupApi, { storage: { get: () => null, set: () => {} } }), Cleanup, TranscriberClient: HelperAutostart, transcriberPorts: helperSeam().ports, teachOnly: true }); }
+    catch (e) { teachPanel = null; }
     return;
   }
   try { cleanupPanel = CleanupPanel.create({ host, api: cleanupApi, Cleanup, TranscriberClient: HelperAutostart, transcriberPorts: helperSeam().ports }); }
@@ -14853,7 +14896,8 @@ function boot() {
   $('btnOpen2').addEventListener('click', openVideoPicker);
   $('btnFile').addEventListener('click', openFileMenu);
   $('btnCopy').addEventListener('click', copyMarkdown);
-  $('btnPrompt').addEventListener('click', copyClaudePrompt);
+  $('btnPromptEdit').addEventListener('click', () => copyClaudePrompt('edit'));
+  $('btnPromptTrain').addEventListener('click', () => copyClaudePrompt('train'));
   $('btnExport').addEventListener('click', exportForClaude);
   $('btnUndo').addEventListener('click', undo);
   $('btnRedo').addEventListener('click', redo);

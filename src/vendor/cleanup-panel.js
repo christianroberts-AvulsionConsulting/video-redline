@@ -1233,6 +1233,16 @@ var CleanupPanel = (function () {
     '.cp-teach-err{color:var(--danger,#ff5d5d)}',
     '.cp-teach .cp-prog{margin:6px 0}',
     '.cp-teach .cp-check{margin-top:8px}',
+    /* the teach section is pinned to the bottom of the panel, with its main button always in view; the details fold under "More" */
+    '.cp-sec-teach{position:sticky;bottom:0;z-index:3;margin-top:auto;border-top:1px solid var(--line,#33363d);border-bottom:0;background:var(--panel,#1d1f23);box-shadow:0 -10px 14px -10px rgba(0,0,0,.55)}',
+    '.cp-teach-head .cp-disc{width:auto;flex:none;font-weight:400;color:var(--muted,#9aa0ab)}',
+    '.cp-sec-teach .cp-teach-go{width:100%;margin-top:2px}',
+    '.cp-sec-teach>.cp-prog{margin:8px 0 2px}',
+    '.cp-sec-teach>.cp-teach-msg{min-height:0;margin:6px 0 0}',
+    '.cp-teach-more{max-height:min(46vh,360px);overflow-x:hidden;overflow-y:auto}',
+    /* with no video open there is no review to show: only the teach section (the page keeps its own "open a video" card above it) */
+    '.cp-teachonly{height:auto;overflow:visible}',
+    '.cp-teachonly>*:not(.cp-sec-teach){display:none!important}',
     '.cp-form-msg.cp-okmsg{color:var(--ok,#3ecf8e)}',
     /* cleanup level: one compact segmented control (real radio buttons) and one help line for the chosen level */
     '.cp-level{border:0;margin:0;padding:0;min-width:0}',
@@ -2306,7 +2316,7 @@ var CleanupPanel = (function () {
      * rendering: skeleton
      * ======================================================================================= */
     function buildSkeleton() {
-      var root = h('div', { 'class': 'cp-root', tabindex: '-1', role: 'region', 'aria-label': 'Audio cleanup' });
+      var root = h('div', { 'class': 'cp-root' + (options.teachOnly ? ' cp-teachonly' : ''), tabindex: '-1', role: 'region', 'aria-label': options.teachOnly ? 'Teach it your ums' : 'Audio cleanup' });
       E.root = root;
 
       /* 1. header */
@@ -2384,12 +2394,7 @@ var CleanupPanel = (function () {
       E.secRange = h('div', { 'class': 'cp-sec' }, [E.rangeToggle, E.rangeBody]);
       root.appendChild(E.secRange);
 
-      /* 3c. teach it your ums: recordings of the person's own ums, and what their Accept and Reject choices say */
-      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
-      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
-      E.teachBody = buildTeachBody();
-      E.secTeach = h('div', { 'class': 'cp-sec' }, [E.teachToggle, E.teachBody]);
-      root.appendChild(E.secTeach);
+      /* (3c, teach it your ums, is the last section: see below) */
 
       /* 4. lists */
       E.lists = {};
@@ -2454,6 +2459,18 @@ var CleanupPanel = (function () {
         h('p', { 'class': 'cp-hint', text: 'Click a word to jump there. Drag, or Shift-click, to select words, then press X to cut them. Dotted words need a decision; struck-through words are cut.' })
       ]);
       root.appendChild(E.secTx);
+
+      /* 6. teach it your ums: pinned to the bottom, there with or without a transcript (and, in teachOnly mode, without a video). The main
+         button, the progress bar and the helper's answer are always in view; the rest (what to record, sounds that are not ums,
+         what it learned, forget) folds under "More". */
+      E.teachToggle = h('button', { type: 'button', 'class': 'cp-disc', 'aria-expanded': 'false' });
+      on(E.teachToggle, 'click', function () { toggleUi('teach'); });
+      E.teachBody = buildTeachBody();
+      E.secTeach = h('div', { 'class': 'cp-sec cp-sec-teach' }, [
+        h('div', { 'class': 'cp-h cp-teach-head' }, [h('h3', { 'class': 'cp-title', text: 'Teach it your ums' }), E.teachToggle]),
+        E.teachUmBtn, E.teachUmFile, E.teachNotFile, E.teachBar, E.teachMsg, E.teachBody
+      ]);
+      root.appendChild(E.secTeach);
 
       wireTranscriptEvents();
       wireRootEvents(root);
@@ -2540,24 +2557,25 @@ var CleanupPanel = (function () {
      * one more piece of evidence, and only to hold a cut back (a sound effect that the speech engines wrote as "um").
      * ======================================================================================= */
     var AUDIO_ACCEPT = 'audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+    /** Builds the main button, the file pickers, the progress bar and the message (the section puts them in view all the time) and returns
+     *  the folded part: what to record, the sounds that are not ums, what it learned and forget. */
     function buildTeachBody() {
-      var body = h('div', { 'class': 'cp-body cp-teach', hidden: true });
+      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, tabindex: '-1', 'aria-label': 'A video or audio recording of your ums' });
+      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, tabindex: '-1', 'aria-label': 'A video or audio recording of sounds that are not ums' });
+      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
+      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
+      E.teachUmBtn = btn('Choose a video or audio of your ums…', 'cp-btn-primary cp-teach-go', function () { E.teachUmFile.click(); }, 'upload', 'Point it at a recording of you saying um, uh, er, hmm ... with a short gap between each. A video works too: only its sound is used.');
+      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
+      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
+      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite', hidden: true });
+
+      var body = h('div', { 'class': 'cp-body cp-teach cp-teach-more', hidden: true });
       body.appendChild(h('p', { 'class': 'cp-sub', text: 'Teach the tool what YOUR ums sound like, so it stops cutting sound effects that it mistakes for ums. It learns from recordings you point it at and from your Accept and Reject choices (Reject means: this is not an um). Everything stays on this computer, and only numbers that describe each sound are kept, never the audio.' }));
       E.teachStatus = h('p', { 'class': 'cp-teach-status', role: 'status', 'aria-live': 'polite' });
       body.appendChild(E.teachStatus);
-      E.teachUmFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of your ums' });
-      E.teachNotFile = h('input', { type: 'file', accept: AUDIO_ACCEPT, hidden: true, 'aria-label': 'A recording of sounds that are not ums' });
-      on(E.teachUmFile, 'change', function () { var f = E.teachUmFile.files && E.teachUmFile.files[0]; E.teachUmFile.value = ''; if (f) { startTeach('um', f); } });
-      on(E.teachNotFile, 'change', function () { var f = E.teachNotFile.files && E.teachNotFile.files[0]; E.teachNotFile.value = ''; if (f) { startTeach('notum', f); } });
-      E.teachUmBtn = btn('Choose a recording of your ums', 'cp-btn-primary', function () { E.teachUmFile.click(); }, null, 'One long recording of you saying um, uh, er, hmm ... with a short gap between each');
       E.teachNotBtn = btn('Choose a recording of sounds that are not ums', '', function () { E.teachNotFile.click(); }, null, 'Sound effects, breaths, clicks, laughs: the sounds that get mistaken for ums');
-      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachUmBtn, E.teachNotBtn, E.teachUmFile, E.teachNotFile]));
-      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
-      E.teachFill = h('div', { 'class': 'cp-prog-fill' });
-      E.teachBar = h('div', { 'class': 'cp-prog', role: 'progressbar', 'aria-label': 'Learning from a recording', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': '0', hidden: true }, [E.teachFill]);
-      E.teachMsg = h('p', { 'class': 'cp-teach-msg', role: 'status', 'aria-live': 'polite' });
-      body.appendChild(E.teachBar);
-      body.appendChild(E.teachMsg);
+      body.appendChild(h('div', { 'class': 'cp-bulk' }, [E.teachNotBtn]));
+      body.appendChild(h('p', { 'class': 'cp-sub', text: 'Ums: one long recording of you saying um, uh, er and hmm, with a short gap (about a second) between each, in a quiet room. A video works too (only its sound is used), but it should be just the ums, not a whole talk. Not ums: the sound effects, breaths, clicks and laughs that get mistaken for ums. A sound that looks nothing like the rest of an ums recording (a cough, a click) is left out.' }));
       E.teachClips = h('div', { 'class': 'cp-rows' });
       body.appendChild(E.teachClips);
       E.teachDecisions = h('p', { 'class': 'cp-sub' });
@@ -2592,7 +2610,7 @@ var CleanupPanel = (function () {
       var need = st.needs && st.needs.ums ? st.needs.ums : 10;
       var line;
       if (!st.ready) {
-        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums below, or Accept a few ums as they come up.';
+        line = 'Not using it yet: it needs at least ' + need + ' ums to start and has ' + num(st.ums, 0) + '. Give it a recording of your ums with the button above, or Accept a few ums as they come up.';
       } else if (st.kind === 'one-class') {
         line = 'Learned how ' + st.ums + ' of your ums sound, and holds back sounds that look very different. Add a recording of sounds that are not ums to tell it where the line is.';
       } else {
@@ -2605,15 +2623,21 @@ var CleanupPanel = (function () {
       return line;
     }
     function renderTeach() {
-      if (!E.teachBody || !S.ui || !S.ui.teach) { return; }
+      if (!E.teachBody || !S.ui) { return; }
       var T = S.teach, st = T.status, has = !!getTeachClient();
-      setText(E.teachStatus, teachStatusLine());
-      setText(E.teachMsg, T.error || T.msg || T.said || '');
+      // always in view, folded or not: the main button, the progress bar and the answer (with no helper in this build, the reason)
+      var said = T.error || T.msg || T.said || (has ? '' : teachStatusLine());
+      setText(E.teachMsg, said);
+      E.teachMsg.hidden = !said;
       E.teachMsg.className = 'cp-teach-msg' + (T.error ? ' cp-teach-err' : '');
       E.teachBar.hidden = !T.busy;
       E.teachFill.style.width = Math.max(0, Math.min(100, T.pct)) + '%';
       E.teachBar.setAttribute('aria-valuenow', String(Math.round(T.pct)));
-      [E.teachUmBtn, E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
+      E.teachUmBtn.disabled = !has || T.busy;
+      if (!S.ui.teach) { return; }
+      // the folded part, only while it is open
+      setText(E.teachStatus, teachStatusLine());
+      [E.teachNotBtn, E.teachForget].forEach(function (b) { b.disabled = !has || T.busy; });
       E.teachAgain.disabled = !has || T.busy;
       clearEl(E.teachClips);
       ((st && st.clips) || []).forEach(function (c) {
@@ -2789,7 +2813,7 @@ var CleanupPanel = (function () {
       // closed, the one line still names the level: "Cleanup level: Balanced - change"
       setDisc(E.setToggle, E.setBody, so ? 'Settings' : (lv ? 'Cleanup level: ' + lv.label + ' - change' : 'Settings - change'), so);
       setDisc(E.advToggle, E.advBody, 'Advanced', !!S.ui.advanced);
-      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'Teach it your ums', !!S.ui.teach); renderTeach(); }
+      if (E.teachToggle) { setDisc(E.teachToggle, E.teachBody, 'More', !!S.ui.teach); renderTeach(); }
       setDisc(E.rangeToggle, E.rangeBody, 'Cut a time range', !!S.ui.range);
       var n = listCounts();
       ['applied', 'mine', 'rejected'].forEach(function (k) { setDisc(E.lists[k].toggle, E.lists[k].body, E.lists[k].label, !!S.ui[k], n[k]); });
@@ -4264,6 +4288,7 @@ var CleanupPanel = (function () {
 
     /* restore the last session */
     (function restore() {
+      if (options.teachOnly) { renderAll(); return; }       // no video: nothing to restore, and nothing of it is read or written
       var stored = jget(KEYS.transcript);
       var lk = jget(KEYS.links);
       var dec = jget(KEYS.decisions);

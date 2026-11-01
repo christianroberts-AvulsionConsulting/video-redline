@@ -113,6 +113,10 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 #paneCleanup .pane-body { padding: 0; overflow: hidden; position: relative; }
 #cleanupHost { position: absolute; inset: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #3a3f49 transparent; }
 #cleanupHost .cp-root { scrollbar-width: thin; scrollbar-color: #3a3f49 transparent; }
+/* no video open: the "open a video" card takes the free space, and "Teach it your ums" sits under it at the bottom */
+#cleanupHost.idle { display: flex; flex-direction: column; }
+#cleanupHost.idle > .empty { margin: auto; }
+#cleanupHost.idle > .cp-root { flex: none; }
 /* the global form-box rule above is more specific than the panel's own .cp-in: give the panel its own look back (a border you can see, and its smaller boxes) */
 .cp-root .cp-in, .cp-root .cp-in:hover { border-color: var(--cp-in-line, #6b717d); }
 .cp-root .cp-in { padding: 3px 6px; border-radius: 6px; background: var(--bg); }

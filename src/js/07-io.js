@@ -121,12 +121,15 @@ function copyMarkdown() {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('Markdown copied. Paste it to Claude.'), fallback);
   else fallback();
 }
-/* ---------- Prompt for Claude ----------
-   A fallback for when Claude does not pick the video up by itself: one button puts a ready-made prompt on the clipboard.
-   Nothing from Claude in the markers yet: it asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin).
-   Markers drafted by Claude are there (origin.by === 'claude'): it asks Claude to compare them with what was kept, changed and deleted and to learn from it. */
+/* ---------- Prompts for Claude ----------
+   A fallback for when Claude does not pick the video up by itself: two buttons put a ready-made prompt on the clipboard.
+   Edit ('edit'): asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin). Markers that Claude drafted
+   earlier (origin.by === 'claude') are kept as they are, and new drafts are numbered after them.
+   Train ('train'): asks Claude to compare its draft with what was kept, changed and deleted, and to learn from it. When none of Claude's drafts are left
+   in the markers, the prompt says so (they were all deleted, or this video was never drafted). */
 const PROMPT_MAX_NOTES = 30000;                        // longer notes are not pasted into the prompt; Export for Claude carries them instead
-function buildClaudePrompt() {
+function buildClaudePrompt(mode) {
+  const train = mode === 'train';
   const kinds = {}; markers.forEach(m => { const t = typeLabel(m); kinds[t] = (kinds[t] || 0) + 1; });
   const drafted = sorted().filter(m => m.origin && m.origin.by === 'claude');
   const haveWords = !!spokenAt({ start: 0, end: meta.duration });
@@ -134,16 +137,18 @@ function buildClaudePrompt() {
     ? markers.length + ' marker' + (markers.length === 1 ? '' : 's') + ' (' + Object.keys(kinds).map(t => kinds[t] + ' ' + t).join(', ') + ')' + (drafted.length ? ', ' + drafted.length + ' of them drafted by you earlier' : '')
     : 'no markers yet';
   const L = [];
-  L.push(drafted.length ? 'I have reviewed your draft for a video in Video Redline. Please learn from what I did.' : 'Please make the first pass of an edit for a video I am marking up in Video Redline.', '');
+  L.push(train
+    ? (drafted.length ? 'I have reviewed your draft for a video in Video Redline. Please learn from what I did.' : 'I have been editing a video in Video Redline. Please learn from what I did.')
+    : (drafted.length ? 'Please make another pass of the edit for a video I am marking up in Video Redline.' : 'Please make the first pass of an edit for a video I am marking up in Video Redline.'), '');
   L.push('VIDEO', 'Name: ' + meta.name, 'Picture: ' + meta.w + 'x' + meta.h + ', ' + fmtFps(fps) + ' fps', 'Length: ' + tc(meta.duration) + ' (' + meta.duration.toFixed(3) + ' s)',
     'Right now: ' + now + '. A transcript is ' + (haveWords ? 'loaded in the Cleanup tab.' : 'not loaded in the Cleanup tab yet.'), '');
   const notes = buildMarkdown();
-  if (drafted.length) {
+  if (train) {
     L.push('WHAT I WANT YOU TO DO',
-      '1. Compare my current markers (below) with the draft you saved: which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.',
+      '1. Compare my current markers (below) with the draft you saved' + (drafted.length ? '' : ' for this video, if you have one') + ': which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.' + (drafted.length ? '' : ' If you have no saved draft for this video, say so, and learn only from the markers I made myself and the cuts I accepted.'),
       '2. Tell me the patterns in a few plain lines, for example "you delete recap lists" or "you move cards half a second later".',
       '3. Update your notes about my taste, so the next first pass needs less fixing. Do not change my markers or the video.', '',
-      'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.',
+      drafted.length ? 'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.' : 'None of your drafts are in my markers: I deleted them all, or you never drafted this video.',
       'If you have the JSON from Export for Claude, use it: it carries your origin tags and exact values.', '',
       'MY MARKERS NOW', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
     return L.join('\n');
@@ -155,7 +160,7 @@ function buildClaudePrompt() {
     '4. Keep visuals away from dead air and ums that will be cut. Give each visual a box, clear of whatever the speaker is pointing at.',
     '5. Save the draft as ONE Video Redline session file (.json, format below) next to the video and tell me the path. I will open it with File, Load session from file, then accept, reject or edit each marker.', '',
     'HOW TO TAG YOUR DRAFT',
-    'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
+    'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on' + (drafted.length ? '; your earlier drafts already use ' + drafted.map(m => m.origin.candidateId).join(', ') + ', so number new ones after those' : '') + '). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
     'FILE FORMAT',
     '{ "tool": "video-review", "version": 2,',
     '  "video": { "name": ' + JSON.stringify(meta.name) + ', "width": ' + meta.w + ', "height": ' + meta.h + ', "fps": ' + fmtFps(fps) + ', "duration": ' + +meta.duration.toFixed(3) + ' },',
@@ -170,9 +175,11 @@ function buildClaudePrompt() {
   if (markers.length) L.push('', 'MARKERS I ALREADY HAVE (keep them in the file exactly as they are, and keep your visuals off them)', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
   return L.join('\n');
 }
-function copyClaudePrompt() {
+function copyClaudePrompt(mode) {
   if (needVideo()) return;
-  copyPlainText(buildClaudePrompt(), 'Prompt copied. Paste it into Claude.', 'Could not copy. Use Export for Claude instead.');
+  const train = mode === 'train';
+  if (train && !markers.length) { toast('No markers yet, so Claude has nothing to learn from. Review the cuts and add your own markers first.', 5000); return; }
+  copyPlainText(buildClaudePrompt(mode), (train ? 'Prompt to train Claude copied.' : 'Prompt to edit copied.') + ' Paste it into Claude.', 'Could not copy. Use Export for Claude instead.');
 }
 function saveSessionFile() {                           // File, Download session file (File, Save session is in 07-sessions.js: it saves into the sessions folder)
   if (needVideo()) return;
