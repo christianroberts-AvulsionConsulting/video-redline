@@ -45,11 +45,18 @@
     </div>
     <div class="pane active" id="paneCleanup" role="tabpanel" aria-labelledby="tabCleanup"><div class="pane-body" id="cleanupScroll"><div id="cleanupHost"></div></div></div>
     <div class="pane" id="paneMarkers" role="tabpanel" aria-labelledby="tabMarkers">
+      <div class="mfilter" id="mFilter" hidden></div>
       <div class="pane-body" id="list"></div>
       <div class="empty" id="emptyMsg">
         <span class="empty-ic" data-icon="marker"></span>
         <b>No markers yet</b>
         <p>Press <kbd>M</kbd> to drop one at the playhead, or drag along a timeline track to mark a stretch.</p>
+      </div>
+      <div class="empty" id="noMatchMsg" hidden>
+        <span class="empty-ic" data-icon="filter"></span>
+        <b>No markers of these types</b>
+        <p>The type filter above is hiding every marker.</p>
+        <button class="btn sm" id="btnNoMatchAll" type="button">Show all types</button>
       </div>
     </div>
     <div class="pane" id="paneVisuals" role="tabpanel" aria-labelledby="tabVisuals"></div>

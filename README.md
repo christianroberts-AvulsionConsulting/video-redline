@@ -122,7 +122,7 @@ Your markers stay in your browser. They take almost no space, so you can leave t
 
 Laid out like a video editor:
 
-- **Left panel** runs the full height of the window and has four tabs: **Cleanup** (finds ums, dead air and stutters from a transcript; its heading says Audio cleanup; the page opens on this tab), **Markers** (your list), **Styles** (the look of a visual; the **Filter** button narrows the list) and **Visuals** (designs you saved).
+- **Left panel** runs the full height of the window and has four tabs: **Cleanup** (finds ums, dead air and stutters from a transcript; its heading says Audio cleanup; the page opens on this tab), **Markers** (your list; the **All types** button at the top ticks which marker types the list shows, and only the list changes, the timeline and exports still hold every marker), **Styles** (the look of a visual; the **Filter** button narrows the list) and **Visuals** (designs you saved).
 - **Middle** is the video with the play controls under it.
 - **Right panel** shows the **Properties** of the marker you selected: type, comment, times, its visual and boxes.
 - **Bottom** is the timeline, under the video and the properties, one track per marker type. Drag the bar above it to make it taller or shorter.

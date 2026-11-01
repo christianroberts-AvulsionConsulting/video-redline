@@ -119,11 +119,83 @@ function syncTimeFields(m) {
 /* ---------- marker list (left panel) ---------- */
 function renderList() {
   listEl.textContent = '';
-  const order = sorted();
-  order.forEach((m, i) => listEl.appendChild(markerCard(m, i + 1)));
+  let shownN = 0;
+  sorted().forEach((m, i) => { if (listShows(m)) { shownN++; listEl.appendChild(markerCard(m, i + 1)); } });       // the number stays the marker's place in time, filter or not: it matches "#3" in the properties panel
   $('countBadge').textContent = markers.length;
   $('emptyMsg').hidden = markers.length > 0;
+  $('noMatchMsg').hidden = !(markers.length > 0 && shownN === 0);
+  renderTypeFilter(shownN);
 }
+
+/* ---------- type filter (top of the Markers tab): tick the types the list should show ---------- */
+// Only the list is filtered. The timeline, the video overlay, undo and the exports still hold every marker.
+const typeKey = m => TYPE_NAMES.includes(m.type) ? m.type : 'custom';        // every type you typed yourself counts as "custom"
+const hiddenTypes = new Set();                                                // type keys the list leaves out (kept in memory only: a filter that came back after a restart would look like lost markers)
+// The selected marker always stays in the list: a marker you just added, or one whose type you just changed, would otherwise vanish while you work on it.
+const listShows = m => !hiddenTypes.has(typeKey(m)) || m.id === selId;
+function typeCounts() {
+  const c = {};
+  markers.forEach(m => { const k = typeKey(m); c[k] = (c[k] || 0) + 1; });
+  return c;
+}
+// The rows of the menu: the five standard types always, "custom" only when a marker has one (or it is ticked off and must be possible to tick back on)
+function filterKeys() {
+  const c = typeCounts(), keys = TYPE_NAMES.slice();
+  if (c.custom || hiddenTypes.has('custom')) keys.push('custom');
+  return keys;
+}
+function setTypeShown(key, on) { if (on) hiddenTypes.delete(key); else hiddenTypes.add(key); renderList(); }
+function showAllTypes() { hiddenTypes.clear(); renderList(); }
+
+let typeMenuSync = null;                   // set while the menu is open, so a change made behind it (Undo, a new marker) updates its ticks and counts
+function openTypeMenu(anchor, byKeyboard) {
+  const rows = {};
+  const menu = h('div', { class: 'menu tf-menu', role: 'menu', 'aria-label': 'Marker types to show' });
+  filterKeys().forEach(k => {
+    const row = h('button', { class: 'tf-row', type: 'button', role: 'menuitemcheckbox', style: '--tc:' + colorOf(k), title: k === 'custom' ? 'Markers with a type you typed yourself' : helpOf(k), onclick: () => setTypeShown(k, hiddenTypes.has(k)) },
+      h('span', { class: 'tf-box' }, icon('check')), icon(iconOf(k)), h('span', { class: 'tf-name', text: k }), h('span', { class: 'tf-n' }));
+    rows[k] = row; menu.appendChild(row);
+  });
+  const all = h('button', { type: 'button', role: 'menuitem', onclick: showAllTypes }, 'Show all types');
+  menu.append(h('hr'), all);
+  typeMenuSync = () => {
+    const c = typeCounts();
+    Object.keys(rows).forEach(k => {
+      const on = !hiddenTypes.has(k);
+      rows[k].classList.toggle('on', on); rows[k].classList.toggle('none', !c[k]);
+      rows[k].setAttribute('aria-checked', String(on));
+      rows[k].querySelector('.tf-n').textContent = String(c[k] || 0);
+    });
+    all.disabled = hiddenTypes.size === 0;
+  };
+  typeMenuSync();
+  anchor.setAttribute('aria-expanded', 'true');
+  openPopover(anchor, menu, { onClose: () => { typeMenuSync = null; anchor.setAttribute('aria-expanded', 'false'); } });
+  if (byKeyboard) { const first = menu.querySelector('button'); if (first) first.focus(); }
+}
+// The bar is built once and then updated in place: the open menu hangs on its button, which must stay the same element.
+let typeBar = null;
+function renderTypeFilter(shownN) {
+  const bar = $('mFilter');
+  if (!typeBar) {
+    const btn = h('button', { class: 'btn sm', id: 'btnTypeFilter', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Choose which marker types the list shows',
+      onclick: e => { if (typeMenuSync) closePopover(); else openTypeMenu(btn, e.detail === 0); } });
+    const lbl = h('span', { class: 'lbl' });
+    btn.append(icon('filter'), lbl, icon('chevron-down'));
+    const clear = h('button', { class: 'btn icon sm ghost', type: 'button', title: 'Show all types', 'aria-label': 'Show all types', onclick: showAllTypes }, icon('x'));
+    const count = h('span', { class: 'mfilter-count' });
+    bar.append(btn, clear, count);
+    typeBar = { btn, lbl, clear, count };
+  }
+  bar.hidden = markers.length === 0;
+  if (typeMenuSync) { if (bar.hidden) closePopover(); else typeMenuSync(); }          // the last marker went (Undo, Delete): the menu has nothing left to filter
+  const keys = filterKeys(), on = keys.filter(k => !hiddenTypes.has(k)), active = on.length < keys.length;
+  typeBar.lbl.textContent = !active ? 'All types' : !on.length ? 'No types' : on.length <= 2 ? on.join(', ') : on.length + ' of ' + keys.length + ' types';
+  typeBar.btn.classList.toggle('on', active);
+  typeBar.clear.hidden = typeBar.count.hidden = !active;
+  typeBar.count.textContent = shownN + ' of ' + markers.length;
+}
+$('btnNoMatchAll').addEventListener('click', showAllTypes);
 function markerCard(m, num) {
   const hasComment = !!m.comment.trim(), pills = [];
   if (m.boxes.length) pills.push(h('span', { class: 'pill' }, icon('box'), m.boxes.length + (m.boxes.length === 1 ? ' box' : ' boxes')));
