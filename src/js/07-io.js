@@ -127,8 +127,9 @@ function copyMarkdown() {
    A fallback for when Claude does not pick the video up by itself: two buttons put a ready-made prompt on the clipboard.
    Edit ('edit'): asks for a first pass (transcript, a draft of visual markers as a session file, each tagged with an origin). Markers that Claude drafted
    earlier (origin.by === 'claude') are kept as they are, and new drafts are numbered after them.
-   Train ('train'): asks Claude to compare its draft with what was kept, changed and deleted, and to learn from it. When none of Claude's drafts are left
-   in the markers, the prompt says so (they were all deleted, or this video was never drafted). */
+   Train ('train'): asks Claude to compare its draft with what was kept, changed and deleted, and to keep what it learns in video-redline-taste.md, one line
+   per pattern with a count of videos. Edit reads that file first. The page cannot save or read it: only Claude can, so both prompts name the file and the count rules.
+   When none of Claude's drafts are left in the markers, the Train prompt says so (they were all deleted, or this video was never drafted). */
 const PROMPT_MAX_NOTES = 30000;                        // longer notes are not pasted into the prompt; Export for Claude carries them instead
 function buildClaudePrompt(mode) {
   const train = mode === 'train';
@@ -149,18 +150,20 @@ function buildClaudePrompt(mode) {
     L.push('WHAT I WANT YOU TO DO',
       '1. Compare my current markers (below) with the draft you saved' + (drafted.length ? '' : ' for this video, if you have one') + ': which of yours I kept unchanged, which I changed (timing, kind, style, words, box or comment), which I deleted, what I added myself, and which cut suggestions from the Cleanup tab I accepted. A marker of yours that is missing below was deleted.' + (drafted.length ? '' : ' If you have no saved draft for this video, say so, and learn only from the markers I made myself and the cuts I accepted.'),
       '2. Tell me the patterns in a few plain lines, for example "you delete recap lists" or "you move cards half a second later".',
-      '3. Update your notes about my taste, so the next first pass needs less fixing. Do not change my markers or the video.', '',
+      '3. Update my taste notes, so the next first pass needs less fixing. Keep them in ONE file called video-redline-taste.md (if you already keep notes about me somewhere that you read at the start of every chat, put the file there). If it exists, update it, do not start over. One line per pattern: "<what I do or want> | seen in N videos | last: <video name, date> | <short example>". A pattern that shows up again gets N + 1. A new one starts at "seen in 1 video" and is only a hint. A pattern this video goes against gets N - 1 and a note saying so, and is dropped at 0. Count each video once: if I train on this video again, update the lines but leave the counts alone. Never turn one video into a firm rule.',
+      '4. Show me the lines you added or changed, and the path of the file. If you cannot save files, say so and give me the whole text to keep. Do not change my markers or the video.', '',
       drafted.length ? 'Your drafts that are still there (id, then where it starts): ' + drafted.map(m => m.origin.candidateId + ' at ' + tc(m.start)).join(', ') + '.' : 'None of your drafts are in my markers: I deleted them all, or you never drafted this video.',
       'If you have the JSON from Export for Claude, use it: it carries your origin tags and exact values.', '',
       'MY MARKERS NOW', notes.length <= PROMPT_MAX_NOTES ? notes : 'My notes are too long to paste here. Use Export for Claude and give both files to Claude.');
     return L.join('\n');
   }
   L.push('WHAT I WANT YOU TO DO',
-    '1. Get a transcript with word times for this video. Use the Video Redline helper (tools/transcribe.py in the Video Redline folder) or any speech to text that runs on this computer. The video must not be uploaded anywhere.',
-    '2. Look at a few frames first, so you know what is already on screen. Do not repeat text that is already in the picture.',
-    '3. Draft the visual markers a viewer would need: lists, steps, diagrams, callouts, shortcuts, big numbers, quotes, title cards, lower thirds. A spoken keyboard shortcut, a list of steps or rules, a term being defined, a number being read out and a "watch next" are the clearest cases. Skip anything that would only decorate.',
-    '4. Keep visuals away from dead air and ums that will be cut. Give each visual a box, clear of whatever the speaker is pointing at.',
-    '5. Save the draft as ONE Video Redline session file (.json, format below) next to the video and tell me the path. I will open it with File, Load session from file, then accept, reject or edit each marker.', '',
+    '1. Read my taste notes first, if you have them: a file called video-redline-taste.md, or whatever you remember about how I edit. Follow the patterns marked "seen in 2 videos" or more. Treat "seen in 1 video" as a hint, not a rule. When a pattern shaped a marker, name it in that marker\'s "reason".',
+    '2. Get a transcript with word times for this video. Use the Video Redline helper (tools/transcribe.py in the Video Redline folder) or any speech to text that runs on this computer. The video must not be uploaded anywhere.',
+    '3. Look at a few frames first, so you know what is already on screen. Do not repeat text that is already in the picture.',
+    '4. Draft the visual markers a viewer would need: lists, steps, diagrams, callouts, shortcuts, big numbers, quotes, title cards, lower thirds. A spoken keyboard shortcut, a list of steps or rules, a term being defined, a number being read out and a "watch next" are the clearest cases. Skip anything that would only decorate.',
+    '5. Keep visuals away from dead air and ums that will be cut. Give each visual a box, clear of whatever the speaker is pointing at.',
+    '6. Save the draft as ONE Video Redline session file (.json, format below) next to the video and tell me the path. I will open it with File, Load session from file, then accept, reject or edit each marker.', '',
     'HOW TO TAG YOUR DRAFT',
     'Put "origin": {"by": "claude", "candidateId": "v1", "reason": "one sentence why", "confidence": 0.7} on every marker you draft (ids v1, v2, and so on' + (drafted.length ? '; your earlier drafts already use ' + drafted.map(m => m.origin.candidateId).join(', ') + ', so number new ones after those' : '') + '). Keep a copy of your draft. When I am done I will ask you to compare it with my final edit and learn from what I kept, changed and deleted.', '',
     'FILE FORMAT',
