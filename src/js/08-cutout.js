@@ -12,6 +12,7 @@
    and the cut you just heard skipped (or the one the playhead sits in) gets Commit and Put back buttons.
    ===================================================================== */
 let skipCuts = false;                           // the view is on (named for the button it grew from: it used to only skip the cuts while playing)
+let hideCuts = false;                           // the timeline draws no cut track and no shading, to keep it quiet; the cuts still work, still skip, and stay in the lists and the export
 let cutCache = null, cutKey = '';               // { cuts, spans, removed }, rebuilt when the markers or the panel's cards change
 let chipRange = null;                           // { lo, hi }: the stretch the bar's buttons act on
 let panelSeen = null, panelSerial = 0, seenRev = '';
@@ -81,6 +82,15 @@ function setSkipCuts(on) {
   refreshCutView();
 }
 
+// "Cut track" button: show or hide the cuts on the timeline (the track of red clips and the Cuts out shading)
+function setHideCuts(on) {
+  hideCuts = !!on; ui.hideCuts = hideCuts; saveUi();
+  const b = $('bCutVis'); b.classList.toggle('on', !hideCuts); b.setAttribute('aria-pressed', String(!hideCuts)); setIcon(b, hideCuts ? 'eye-off' : 'eye');
+  b.title = hideCuts ? 'The cuts are hidden on the timeline. Click to show the cut track again.'
+                     : 'Hide the cuts on the timeline (the cut track and the shading) to keep it quiet. They still work and stay in the Markers tab.';
+  if (meta) renderTimeline();
+}
+
 /* ---------- what the view shows ---------- */
 // Everything that depends on the cuts, redrawn: the shading on the timeline, the bar, the buttons on the cut, the clock line
 function refreshCutView() {
@@ -97,7 +107,7 @@ setInterval(() => {                                    // the panel's own decisi
 
 function renderCutBands() {
   const old = lanes.querySelector('.cutbands'); if (old) old.remove();
-  if (!skipCuts || !meta) return;
+  if (!skipCuts || hideCuts || !meta) return;
   const dur = nF() / fps, wrap = h('div', { class: 'cutbands' });
   cutData().cuts.forEach(c => wrap.appendChild(h('div', { class: 'cutband ' + c.state, style: 'left:' + (c.start / dur * 100) + '%;width:' + ((c.end - c.start) / dur * 100) + '%' })));
   lanes.insertBefore(wrap, lanes.firstChild);          // behind the clips

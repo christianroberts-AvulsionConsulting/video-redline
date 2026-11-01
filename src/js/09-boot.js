@@ -147,6 +147,8 @@ function boot() {
   $('bSkip').addEventListener('click', () => setSkipCuts(!skipCuts));
   $('cbCommitAll').addEventListener('click', commitAllCuts);
   setSkipCuts(ui.skipCuts === true);
+  $('bCutVis').addEventListener('click', () => setHideCuts(!hideCuts));
+  setHideCuts(ui.hideCuts === true);
   buildCleanupPanel();
   $('speed').addEventListener('change', e => { video.playbackRate = parseFloat(e.target.value); e.target.blur(); });
   try {

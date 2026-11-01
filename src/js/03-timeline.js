@@ -137,13 +137,13 @@ function renderTimeline() {
   lanes.textContent = ''; heads.textContent = '';
   if (!meta) { lanes.appendChild(h('div', { class: 'none', text: 'Open a video to start marking it up.' })); return; }
   const n = nF(), order = sorted(), groups = new Map(), minF = 8 * nF() / Math.max(1, axis.clientWidth || 600);   // a clip is drawn at least 8 px wide
-  order.forEach((m, i) => { const k = typeLabel(m); if (!groups.has(k)) groups.set(k, []); groups.get(k).push([m, i + 1]); });
+  order.forEach((m, i) => { if (hideCuts && m.type === 'cut') return; const k = typeLabel(m); if (!groups.has(k)) groups.set(k, []); groups.get(k).push([m, i + 1]); });      // (numbers stay the real ones when the cut track is hidden, 08-cutout.js)
   const keys = [...groups.keys()].sort((a, b) => typeRank(a) - typeRank(b) || a.localeCompare(b));
   const W = axis.clientWidth || 600;
   let y = 0;
   if (!keys.length) {
     heads.appendChild(h('div', { class: 'head', style: '--tc:' + colorOf('note') + ';top:0;height:64px' }, icon('layers'), 'Markers'));
-    lanes.appendChild(h('div', { class: 'none', text: 'No markers yet. Press M, or drag on this track to mark a stretch.' }));
+    lanes.appendChild(h('div', { class: 'none', text: markers.length ? 'The cuts are hidden here. Press Cut track above to show them.' : 'No markers yet. Press M, or drag on this track to mark a stretch.' }));
     lanes.appendChild(h('div', { class: 'trk', 'data-type': 'note', style: 'top:0;height:64px' }));
     heads.style.minHeight = lanes.style.height = '64px';       // min-height, so the name column still stretches to the bottom and hides the playhead behind it
     renderCutBands();

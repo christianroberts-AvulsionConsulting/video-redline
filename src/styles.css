@@ -484,7 +484,7 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 }
 /* the timeline toolbar gives up words in steps as the timeline itself gets narrower (the window width alone says too little: the left panel takes 270 to 430 px):
    first the labels of the side buttons, then all labels, then the key hints. The zoom slider shrinks before any of that, and a scrollbar is the last resort. */
-@container (max-width: 1100px) { .tl-toolbar #bSkip .lbl, .tl-toolbar #zSel .lbl, .tl-toolbar #zFit .lbl { display: none; } }
+@container (max-width: 1100px) { .tl-toolbar #bSkip .lbl, .tl-toolbar #bCutVis .lbl, .tl-toolbar #zSel .lbl, .tl-toolbar #zFit .lbl { display: none; } }
 @container (max-width: 900px) { .tl-toolbar .btn .lbl { display: none; } }
 @container (max-width: 760px) { .tl-toolbar kbd { display: none; } }
 @media (max-width: 700px) {      /* the top bar would run off the window and take the panel buttons with it: icons only for the wide buttons */
