@@ -304,9 +304,6 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 .timeline { grid-area: tl; display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
 .timeline { container-type: inline-size; }       /* the toolbar below adapts to the width of the timeline itself, which is narrower than the window by the left panel */
 .tl-toolbar { display: flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border-bottom: 1px solid var(--line); flex: none; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; scrollbar-color: #4a505c transparent; }
-.tl-toolbar .inout { margin-left: 8px; color: var(--text-3); font-size: 12px; white-space: nowrap; }
-.tl-toolbar .inout b { color: var(--text); font: 600 12px var(--mono); }
-.tl-toolbar #bClearIO { margin-left: -4px; }
 .tl-toolbar input[type=range] { width: auto; flex: 0 1 130px; min-width: 24px; }       /* gives way first when the bar is tight, but never shrinks to nothing */
 .tl-toolbar > * { flex-shrink: 0; }       /* buttons keep their size; only the zoom slider above gives way */
 .zv { min-width: 42px; text-align: right; font: 600 12px var(--mono); color: var(--text-2); }
@@ -924,7 +921,6 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
       <button class="btn primary sm" id="bMark" data-icon="marker" title="Add a marker at the playhead (M)"><span class="lbl">Add marker</span><kbd>M</kbd></button>
       <button class="btn sm" id="bIn" data-icon="in-point" title="Set the in point at the playhead (I)"><span class="lbl">In</span><kbd>I</kbd></button>
       <button class="btn sm" id="bOut" data-icon="out-point" title="Set the out point at the playhead (O)"><span class="lbl">Out</span><kbd>O</kbd></button>
-      <span class="inout">In <b id="inVal">—</b> Out <b id="outVal">—</b></span>
       <button class="btn icon sm ghost" id="bClearIO" data-icon="x" title="Clear the in and out points" hidden></button>
       <button class="btn sm" id="bSkip" data-icon="scissors" aria-pressed="false" title="Watch the video with every cut taken out, including the ones still waiting for your decision"><span class="lbl">Cuts out</span></button>
       <button class="btn sm on" id="bCutVis" data-icon="eye" aria-pressed="true" title="Hide the cuts on the timeline (the cut track and the shading) to keep it quiet. They still work and stay in the Markers tab."><span class="lbl">Cut track</span></button>
@@ -12575,8 +12571,7 @@ function renderRuler() {
 }
 function renderIO() {
   ioLayer.textContent = '';
-  $('inVal').textContent = inF == null ? '—' : tcf(T(inF));
-  $('outVal').textContent = outF == null ? '—' : tcf(T(outF));
+  $('bClearIO').title = 'Clear the in and out points (In ' + (inF == null ? '—' : tcf(T(inF))) + ', Out ' + (outF == null ? '—' : tcf(T(outF))) + ')';      // the times are not written on the toolbar: the flags on the ruler show them
   $('bClearIO').hidden = inF == null && outF == null;
   if (!meta) return;
   const n = nF(), add = (cls, f, txt) => {

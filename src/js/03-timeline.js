@@ -119,8 +119,7 @@ function renderRuler() {
 }
 function renderIO() {
   ioLayer.textContent = '';
-  $('inVal').textContent = inF == null ? '—' : tcf(T(inF));
-  $('outVal').textContent = outF == null ? '—' : tcf(T(outF));
+  $('bClearIO').title = 'Clear the in and out points (In ' + (inF == null ? '—' : tcf(T(inF))) + ', Out ' + (outF == null ? '—' : tcf(T(outF))) + ')';      // the times are not written on the toolbar: the flags on the ruler show them
   $('bClearIO').hidden = inF == null && outF == null;
   if (!meta) return;
   const n = nF(), add = (cls, f, txt) => {
