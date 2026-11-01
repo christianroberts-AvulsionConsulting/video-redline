@@ -146,6 +146,7 @@ function renderTimeline() {
     lanes.appendChild(h('div', { class: 'none', text: 'No markers yet. Press M, or drag on this track to mark a stretch.' }));
     lanes.appendChild(h('div', { class: 'trk', 'data-type': 'note', style: 'top:0;height:64px' }));
     heads.style.minHeight = lanes.style.height = '64px';       // min-height, so the name column still stretches to the bottom and hides the playhead behind it
+    renderCutBands();
     return;
   }
   keys.forEach((k, ti) => {
@@ -169,6 +170,7 @@ function renderTimeline() {
     y += th;
   });
   heads.style.minHeight = lanes.style.height = y + 'px';
+  renderCutBands();                                            // the Cuts out view shades every cut (08-cutout.js)
 }
 
 /* ---------- mouse on the timeline ----------

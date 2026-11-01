@@ -12,7 +12,6 @@ let rangeEnd = null, rangeTimer = null;         // playRange(): pause when the v
 const timeCbs = [];
 let batching = 0, batchDirty = false;
 let panelSaid = '';                             // the last thing the panel told the user (api.toast); loadSessionFile adds it to its own toast so the page does not paint over it
-let skipCuts = false;                           // while playing, jump over cut markers
 
 // What a cut remembers about where it came from (kept in the saved markers and the JSON export).
 // The reason is a sentence ending in "Cuts m:ss to m:ss", up to about 430 characters long; the other strings are short ids.
@@ -389,6 +388,7 @@ function buildCleanupPanel() {
   try { cleanupPanel = CleanupPanel.create({ host, api: cleanupApi, Cleanup, TranscriberClient: HelperAutostart, transcriberPorts: helperSeam().ports }); }
   catch (e) { host.appendChild(h('div', { class: 'pane-note', text: 'Audio cleanup could not start: ' + (e && e.message ? e.message : e) })); }
   updateCleanupBadge();
+  refreshCutView();                             // the Cuts out view also shows the cuts that wait for a decision, and those belong to the new panel
 }
 function updateCleanupBadge() {
   const b = $('cleanupBadge'); if (!b) return;
@@ -437,19 +437,4 @@ function cleanupOpenTranscript(text, name) {
 // true when the engine can read this text as a transcript (the tool's JSON, Whisper JSON, SRT or VTT)
 function looksLikeTranscript(text) { try { return HAS_CLEANUP && !!Cleanup.parseTranscript(text); } catch (e) { return false; } }
 
-/* ---------- skip the cuts while playing, to hear the video the way it will sound after the cuts ---------- */
-function skipCutsCheck() {
-  if (!skipCuts || !meta || video.paused || rangeEnd != null) return;      // (a Preview of a stretch plays that stretch as asked, even inside a cut)
-  let t = video.currentTime, jumped = false;
-  for (let guard = 0; guard < 50; guard++) {          // cuts can touch each other: keep going to the end of the run
-    const c = markers.find(m => m.type === 'cut' && t >= m.start - 0.001 && t < m.end - 0.001);
-    if (!c) break;
-    t = c.end; jumped = true;
-  }
-  if (jumped) video.currentTime = Math.min(t, meta.duration);
-}
-function setSkipCuts(on) {
-  skipCuts = !!on; ui.skipCuts = skipCuts; saveUi();
-  const b = $('bSkip'); b.classList.toggle('on', skipCuts);
-  b.title = skipCuts ? 'Skipping cuts while playing. Click to play everything.' : 'While playing, jump over the cut markers so you hear the video as it will sound after the cuts';
-}
+// Skipping the cuts while playing ("Cuts out") lives in 08-cutout.js.

@@ -4,7 +4,7 @@
 function changed(opts) {
   ver++; renderTimeline(); renderList();
   if (!(opts && opts.keepProps)) renderProps();               // typing a time keeps the panel as it is, so Tab and clicks keep working
-  refreshOverlay(); cleanupMarkersChanged();
+  refreshOverlay(); cleanupMarkersChanged(); cutViewChanged();
   const sel = selId && listEl.querySelector('.mcard.sel'); if (sel) revealIn(listEl, sel);       // the list re-sorts: keep the selected card in view
 }
 
@@ -197,7 +197,8 @@ function renderTypeFilter(shownN) {
 }
 $('btnNoMatchAll').addEventListener('click', showAllTypes);
 function markerCard(m, num) {
-  const hasComment = !!m.comment.trim(), pills = [];
+  const hasComment = !!m.comment.trim(), pills = [], isCut = m.type === 'cut', fin = isFinalCut(m), cutOf = () => cutOfMarker(m);
+  if (isCut) pills.push(h('span', { class: 'pill cutstate ' + (fin ? 'final' : 'proposed'), title: fin ? 'A final cut: yours, or one you committed' : 'A proposal: applied on its own, not confirmed yet' }, icon(fin ? 'check' : 'clock'), fin ? 'final' : 'proposed'));
   if (m.boxes.length) pills.push(h('span', { class: 'pill' }, icon('box'), m.boxes.length + (m.boxes.length === 1 ? ' box' : ' boxes')));
   if (m.visual && isVisualType(m.type)) {
     const st = styleById(m.visual.style), desc = kindLabel(m.visual.kind) + (st ? ' · ' + st.name : '');
@@ -210,6 +211,8 @@ function markerCard(m, num) {
     h('div', { class: 'mcomment' + (hasComment ? '' : ' none'), text: hasComment ? m.comment.trim() : 'No comment yet' }),
     pills.length ? h('div', { class: 'mmeta' }, pills) : null,
     h('div', { class: 'mactions' },
+      isCut && !fin ? h('button', { class: 'btn icon ghost', title: 'Commit this cut: make it final', onclick: e => { e.stopPropagation(); const c = cutOf(); if (c) commitCuts([c]); } }, icon('check')) : null,
+      isCut ? h('button', { class: 'btn icon ghost', title: 'Put this back: take the cut out so this stretch plays', onclick: e => { e.stopPropagation(); const c = cutOf(); if (c) putBackCuts([c]); } }, icon('undo')) : null,
       h('button', { class: 'btn icon ghost', title: 'Duplicate', onclick: e => { e.stopPropagation(); duplicateMarker(m.id); } }, icon('duplicate')),
       h('button', { class: 'btn icon ghost danger', title: 'Delete', onclick: e => { e.stopPropagation(); deleteMarker(m.id); } }, icon('trash'))));
 }
@@ -245,6 +248,7 @@ function renderProps() {
     h('button', { class: 'btn icon sm', title: 'Duplicate this marker', onclick: () => duplicateMarker(m.id) }, icon('duplicate')),
     h('button', { class: 'btn icon sm danger', title: 'Delete this marker', onclick: () => deleteMarker(m.id) }, icon('trash'))));
   propsEl.appendChild(secType(m));
+  if (m.type === 'cut') propsEl.appendChild(secCut(m));        // Commit / Put back (08-cutout.js)
   propsEl.appendChild(secComment(m));          // the comment is what you fill in most, so it sits high in the panel
   propsEl.appendChild(secTime(m));
   if (isVisualType(m.type) && typeof buildVisualSection === 'function') propsEl.appendChild(buildVisualSection(m));

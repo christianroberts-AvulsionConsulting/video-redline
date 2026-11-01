@@ -85,6 +85,21 @@
         <button class="btn sm ghost" id="vzFit" data-icon="fit" title="Show the whole picture again" disabled><span class="lbl">Fit</span></button>
       </div>
     </div>
+    <div class="cutbar" id="cutbar" hidden>
+      <div class="cb-row">
+        <span class="cb-title"><span data-icon="scissors"></span>Cuts out</span>
+        <span class="cb-time" id="cbTime" title="Where the playhead is once the cuts are out, and how long the video is then">0:00.00 / 0:00.00</span>
+        <span class="cb-gone" id="cbGone"></span>
+        <span class="cb-legend">
+          <span title="Cuts you drew or committed"><i class="cb-dot final"></i><b id="cbNFinal">0</b> final</span>
+          <span title="Applied on their own, not confirmed yet"><i class="cb-dot proposed"></i><b id="cbNProposed">0</b> proposed</span>
+          <span title="Waiting under Needs your decision in the Cleanup tab"><i class="cb-dot undecided"></i><b id="cbNUndecided">0</b> undecided</span>
+        </span>
+        <span class="grow"></span>
+        <button class="btn sm primary" id="cbCommitAll" data-icon="check" title="Make every cut final: the same as Accept in the Cleanup tab, for all of them at once"><span class="lbl">Commit all</span></button>
+      </div>
+      <div class="cb-row cb-last" id="cbLast" hidden></div>
+    </div>
     <div class="transport" id="transport">
       <div class="tc" id="clock"><span class="tc-main">0:00.00</span><span class="tc-sub">/ 0:00.00 · frame 0</span></div>
       <div class="tp-center">
@@ -119,7 +134,7 @@
       <button class="btn sm" id="bOut" data-icon="out-point" title="Set the out point at the playhead (O)"><span class="lbl">Out</span><kbd>O</kbd></button>
       <span class="inout">In <b id="inVal">—</b> Out <b id="outVal">—</b></span>
       <button class="btn icon sm ghost" id="bClearIO" data-icon="x" title="Clear the in and out points" hidden></button>
-      <button class="btn sm" id="bSkip" data-icon="scissors" title="While playing, jump over the cut markers so you hear the video as it will sound after the cuts"><span class="lbl">Skip cuts</span></button>
+      <button class="btn sm" id="bSkip" data-icon="scissors" aria-pressed="false" title="Watch the video with every cut taken out, including the ones still waiting for your decision"><span class="lbl">Cuts out</span></button>
       <span class="grow"></span>
       <button class="btn sm ghost" id="zSel" data-icon="box" title="Zoom in on the selected marker"><span class="lbl">Zoom to marker</span></button>
       <button class="btn sm ghost" id="zFit" data-icon="fit" title="Show the whole video (0)"><span class="lbl">Fit all</span></button>

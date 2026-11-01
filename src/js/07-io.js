@@ -38,6 +38,7 @@ function buildMarkdown() {
     L.push('## ' + (i + 1) + '. [' + typeLabel(m) + '] ' + sec2(m.start) + ' s to ' + sec2(m.end) + ' s (' + tc(m.start) + ' to ' + tc(m.end) + ', ' + sec2(m.end - m.start) + ' s)');
     const text = m.comment.trim() ? m.comment.trim().replace(/\r?\n/g, '\n  ') : '(none)';   // later lines are indented so they stay part of the comment
     L.push('Comment: ' + text);
+    if (m.type === 'cut') L.push('Cut status: ' + (isFinalCut(m) ? 'final (the editor drew it or committed it)' : 'proposed (applied automatically; the editor has not confirmed it)'));
     if (m.visual && isVisualType(m.type) && typeof VIS !== 'undefined') {
       const ai = isAiText(m.visual), spoken = ai ? spokenAt(m) : '';           // "AI writes it": no words are exported, only what to write from
       const st = styleById(m.visual.style) || fallbackStyle(), lines = VIS.describe(m.visual, st, ai ? { aiText: true, spoken } : null), first = styleFirst.get(st.id);
@@ -88,6 +89,7 @@ function buildJson(opts) {
         if (!(opts && opts.keepHidden)) delete vv.note;                          // a library visual's note was put into the Comment when it was used; the Comment is what the assistant reads
         o.visual = vv;
       }
+      if (m.type === 'cut') o.status = isFinalCut(m) ? 'final' : 'proposed';
       if (m.origin) o.origin = m.origin;
       return o;
     }),

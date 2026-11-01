@@ -342,6 +342,32 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
 .clip.tiny { padding: 0; } .clip.tiny .e { width: 3px; }
 .clip .vbadge { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #07101f; opacity: .55; margin-right: 5px; }
 
+/* ---------- Cuts out: the view with every cut taken out (08-cutout.js) ---------- */
+.cutbands { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
+.cutband { position: absolute; top: 0; bottom: 0; min-width: 2px; box-shadow: inset 1px 0 0 var(--cb), inset -1px 0 0 var(--cb); }
+.cutband.final { --cb: rgba(239, 83, 80, .85); background: repeating-linear-gradient(135deg, rgba(239, 83, 80, .34) 0 4px, rgba(239, 83, 80, .12) 4px 8px); }
+.cutband.proposed { --cb: rgba(245, 165, 36, .85); background: repeating-linear-gradient(135deg, rgba(245, 165, 36, .30) 0 4px, rgba(245, 165, 36, .10) 4px 8px); }
+.cutband.undecided { --cb: rgba(174, 180, 191, .75); background: rgba(174, 180, 191, .13); }
+.cutbar { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 7px 18px; border-top: 1px solid var(--line); background: var(--panel-2); }
+.cb-row { display: flex; align-items: center; gap: 6px 14px; min-width: 0; flex-wrap: wrap; }
+.cb-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); }
+.cb-title .ic { width: 15px; height: 15px; }
+.cb-time { font: 600 14px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cb-gone { font: 12px var(--mono); color: var(--text-3); white-space: nowrap; }
+.cb-legend { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: var(--text-2); font-size: 12px; }
+.cb-legend b { color: var(--text); font-variant-numeric: tabular-nums; margin-right: 3px; }
+.cb-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+.cb-dot.final { background: #ef5350; } .cb-dot.proposed { background: var(--warn); } .cb-dot.undecided { background: var(--text-3); }
+.cb-last { padding: 5px 8px; border-radius: 8px; background: var(--panel-3); border: 1px solid var(--line-2); }
+.cb-lbl { color: var(--text-2); white-space: nowrap; }
+.cb-lbl b { color: var(--text); font: 600 12px var(--mono); }
+.cb-note { min-width: 0; flex: 0 1 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+.pill.cutstate.final { color: #ffb9b7; background: rgba(239, 83, 80, .2); }
+.pill.cutstate.proposed { color: #ffd58a; background: rgba(245, 165, 36, .18); }
+.pill.cutstate.undecided { color: var(--text-2); background: var(--raise); }
+.cutstate-line { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; }
+.row-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
 /* ---------- status bar ---------- */
 .statusbar { grid-area: status; display: flex; align-items: center; gap: 12px; padding: 0 10px 0 14px; background: var(--panel); border-top: 1px solid var(--line); min-width: 0; }
 .hints { flex: 1; min-width: 0; min-height: 30px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; color: var(--text-3); font-size: 12px; }   /* grows to a second line instead of hiding hints */

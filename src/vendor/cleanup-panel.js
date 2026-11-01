@@ -1307,7 +1307,7 @@ var CleanupPanel = (function () {
     var doc = host.ownerDocument;
     var win = doc.defaultView || {};
     var D = Engine.DEFAULTS || {};
-    var destroyed = false, busy = 0, dirtyWhileBusy = false, batchDepth = 0;
+    var destroyed = false, busy = 0, dirtyWhileBusy = false, batchDepth = 0, rev = 0;      // rev: goes up whenever the cards change (see revision())
     var timers = {}, offs = [];
     var E = {};                       // element references
     var cardEls = new Map();          // candidate id -> card element
@@ -3242,6 +3242,7 @@ var CleanupPanel = (function () {
       if (had && focusStranded()) { restoreFocus(); }      // e.g. Settings closed itself because a transcript opened
     }
     function afterChange() {
+      rev++;
       refreshCutFlags();
       paintAll();
       renderHeader();
@@ -4373,6 +4374,35 @@ var CleanupPanel = (function () {
         };
         if (levelsOn()) { o.level = S.settings.level; }
         return o;
+      },
+      /**
+       * For the page's "Cuts out" view, which has to know about the cuts that have no cut in the page yet. cuts() lists every card as a plain copy
+       * { id, kind, start, end, state, text }; state is 'auto' (applied on its own), 'pending' (waits for a decision), 'accepted' or 'rejected'.
+       * 'auto' and 'accepted' have a cut in the page, 'pending' and 'rejected' have none. [] with no transcript.
+       * revision() is a number that goes up every time the cards change (a decision, a new transcript, a refresh), so the page can tell
+       * cheaply whether its copy of cuts() is old.
+       */
+      cuts: function () {
+        if (destroyed || !S.transcript) { return []; }
+        return S.candidates.map(function (c) { return { id: c.id, kind: c.kind, start: c.start, end: c.end, state: c.st, text: c.text ? String(c.text) : '' }; });
+      },
+      revision: function () { return rev; },
+      /**
+       * decide(which, ids): the same as pressing Accept ('accept': the cut becomes the user's own, final) or Reject ('reject': the cut is taken out)
+       * on every card in ids (ids from cuts(); unknown ids and cards that already are in that state are skipped). It is ONE step for Z and
+       * one batch in the page. Returns how many cards are in the wanted state afterwards among those it was asked to change (the page may
+       * refuse a cut, and that card then waits for a decision again).
+       */
+      decide: function (which, ids) {
+        if (destroyed || !S.transcript || (which !== 'accept' && which !== 'reject') || !Array.isArray(ids)) { return 0; }
+        var want = which === 'accept' ? 'accepted' : 'rejected', seen = {}, list = [];
+        ids.forEach(function (id) { var c = S.candById[id]; if (c && !seen[id] && c.st !== want) { seen[id] = true; list.push(c); } });
+        var n = list.length;
+        if (!n) { return 0; }
+        commit((which === 'accept' ? 'Commit ' : 'Put back ') + n + ' ' + plural(n, 'cut', 'cuts'), function () {
+          list.forEach(function (c) { setDecision(S.decisions, c.kind, c.start, which, c.end); });
+        });
+        return list.filter(function (c) { return c.st === want; }).length;
       },
       wordsBetween: function (t0, t1) {
         if (destroyed || !S.transcript || !Array.isArray(S.transcript.words) || !S.transcript.words.length) { return ''; }
