@@ -102,7 +102,8 @@ function flushEdits() {
 }
 
 /* ---------- elements and state ---------- */
-const app = $('app'), video = $('video'), stage = $('stage'), stageWrap = $('stageWrap'), overlay = $('overlay'), dropEl = $('drop');
+const app = $('app'), video0 = $('video'), stage = $('stage'), stageWrap = $('stageWrap'), overlay = $('overlay'), dropEl = $('drop');
+let video = video0;       // the <video> that is on screen and playing. It is always video0, except while "Cuts out" is on: then it trades places with a second one at each cut (see 08-cutout.js)
 const strip = $('strip'), tlInner = $('tlInner'), axis = $('axis'), ruler = $('ruler'), lanes = $('lanes'), heads = $('heads'), ioLayer = $('ioLayer');
 const playheadEl = $('playhead'), phHead = $('phHead'), listEl = $('list'), propsEl = $('props'), toastEl = $('toast');
 

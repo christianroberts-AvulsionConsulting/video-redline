@@ -7,6 +7,34 @@ try { Object.assign(ui, JSON.parse(store.get('vrt:ui') || '{}')); } catch (e) { 
 ui.tab = 'cleanup';                                                  // the app always opens on the first tab, Cleanup, whichever tab was open last time
 function saveUi() { store.set('vrt:ui', JSON.stringify(ui)); }
 
+/* ---------- Space: play and pause ----------
+   Space belongs to a control the keyboard moved to (it presses the button, ticks the box) and to a field you are typing in. A button the MOUSE clicked
+   only has focus by accident, so Space must still play and pause the video, whatever was clicked last. (It used to press that button again instead:
+   in the Cleanup panel, whose buttons keep focus, that meant Accept, Reject or Restore twice.) While the video is playing, Space always pauses, even
+   in the Cleanup panel, where it would otherwise start the preview of the picked card all over again. */
+const SPACE_PRESS = 'button, a[href], summary, [role=tab], [role=menuitem], input[type=checkbox], input[type=radio], input[type=button]';
+const SPACE_TYPES = 'textarea, select, [contenteditable], input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file])';
+// (:focus-visible cannot tell them apart: a browser counts a button as keyboard-focused as soon as a key is pressed on it. So the page notes
+// which control took focus right after a mouse press.)
+let pointerAt = 0, mouseFocus = null;
+document.addEventListener('pointerdown', () => { pointerAt = performance.now(); }, true);
+document.addEventListener('keydown', e => { if (e.key === 'Tab') pointerAt = 0; }, true);      // Tab moved the focus: that is the keyboard's, whatever the mouse did just before
+document.addEventListener('focusin', e => { mouseFocus = performance.now() - pointerAt < 400 ? e.target : null; }, true);
+function spaceIsForControl(t) {
+  if (!t || !t.matches) return false;
+  if (t.matches(SPACE_TYPES)) return true;
+  return !!t.closest(SPACE_PRESS) && t !== mouseFocus;
+}
+let spaceDown = false;                                    // this Space was used to play or pause: its key-up must not press the focused button
+function spaceToggle(e) { e.preventDefault(); spaceDown = true; if (!e.repeat) togglePlay(); }
+document.addEventListener('keydown', e => {              // (capture phase: runs before the Cleanup panel's own keys)
+  if (e.key !== ' ' || e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!meta || modalStack.length || spaceIsForControl(e.target)) return;
+  if (video.paused && e.target.closest && e.target.closest('#paneCleanup')) return;      // paused in the panel: it may play the picked card; the handler below plays the video if it does not
+  e.stopPropagation(); spaceToggle(e);
+}, true);
+document.addEventListener('keyup', e => { if (e.key === ' ' && spaceDown) { spaceDown = false; e.preventDefault(); e.stopPropagation(); } }, true);
+
 /* ---------- keyboard ---------- */
 document.addEventListener('keydown', e => {
   const t = e.target;
@@ -22,9 +50,9 @@ document.addEventListener('keydown', e => {
     }
   }
   // Typing in a comment, a time box, a search box or a dropdown never triggers shortcuts.
-  if (t.matches && t.matches('input, textarea, select, [contenteditable]')) return;
+  if (t.matches && t.matches(e.key === ' ' ? SPACE_TYPES : 'input, textarea, select, [contenteditable]')) return;      // (Space also reaches a checkbox or button the mouse left focus on: see spaceIsForControl)
   if (e.isComposing || modalStack.length) return;
-  if (t.closest && t.closest('#paneCleanup') && !(e.metaKey || e.ctrlKey)) return;      // the cleanup panel has its own J K A R Z X Space keys
+  if (t.closest && t.closest('#paneCleanup') && e.key !== ' ' && !(e.metaKey || e.ctrlKey)) return;      // the cleanup panel has its own J K A R Z X keys (and Space, which plays the video when the panel did not use it)
   const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod) {
     if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -36,8 +64,8 @@ document.addEventListener('keydown', e => {
   if (!meta) return;
   switch (e.key) {
     case ' ':
-      if (t.closest && t.closest('button, a[href], [role=tab], [role=menuitem]')) break;      // a focused button, link or tab (reached with the keyboard) is activated by Space
-      e.preventDefault(); if (!e.repeat) togglePlay(); break;
+      if (spaceIsForControl(t)) break;      // a button, link or tab the keyboard moved to is activated by Space
+      spaceToggle(e); break;
     case 'ArrowLeft': e.preventDefault(); step(e.shiftKey ? -Math.round(fps) : -1); break;
     case 'ArrowRight': e.preventDefault(); step(e.shiftKey ? Math.round(fps) : 1); break;
     case '+': case '=': zoomBy(2); break;

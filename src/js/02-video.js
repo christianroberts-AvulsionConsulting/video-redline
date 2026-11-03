@@ -5,11 +5,12 @@ let videoFile = null;                           // the File that is open now (th
 // `handle` (optional) is the file's FileSystemFileHandle when the picker or a drop gave one: it is kept so a saved session can open this video again by itself.
 function loadVideo(file, handle) {
   saveNow();                                    // the markers of the video that is open now are kept before another video takes their place
+  relayReset();                                 // the page's own <video> is the live one again, and the second one lets go of the old file
   if (handle) vidRemember(file.name, handle);
   if (objectUrl) URL.revokeObjectURL(objectUrl);
   objectUrl = URL.createObjectURL(file);        // the file is streamed by the browser, never read into memory by us
   pendingName = file.name; videoFile = file;
-  video.src = objectUrl;
+  video.src = objectUrl; video.dataset.url = objectUrl;      // (the url is also noted on the element: the spare video only loads a file it does not hold yet)
 }
 // Back to the empty state (used when a file cannot be played)
 function closeVideo() {
@@ -19,14 +20,15 @@ function closeVideo() {
   $('fileinfo').innerHTML = '<span class="dim">No video open yet</span>';
   overlay.textContent = ''; overlayKey = '';
   changed(); renderRuler();
-  stopRange(); buildCleanupPanel();
+  stopRange(); buildCleanupPanel(); relayReset();
 }
 video.addEventListener('error', () => {
-  if (!video.getAttribute('src')) return;
+  if (video !== video0 || !video.getAttribute('src')) return;      // (this <video> is the spare at the moment: only the live one speaks for the file)
   closeVideo();
   toast('This browser cannot play that file. Try an .mp4 (H.264) or .mov, or open it in Chrome or Safari.', 6500);
 });
 video.addEventListener('loadedmetadata', () => {
+  if (video !== video0) return;                    // (the spare loads the same file again for a cut: that is not a new video)
   if (!video.videoWidth || !isFinite(video.duration)) { closeVideo(); toast('That file has no picture or no readable length.', 5000); return; }
   meta = { name: pendingName, w: video.videoWidth, h: video.videoHeight, duration: video.duration };
   fps = 30; markers = [];
@@ -118,7 +120,15 @@ function refreshOverlay() {
 }
 function tick() { requestAnimationFrame(tick); updateClock(false); refreshOverlay(); }
 // The video's own events keep the clock right even when the browser slows animation (background tabs).
-['seeking', 'seeked', 'timeupdate', 'play', 'pause', 'ended'].forEach(ev => video.addEventListener(ev, () => { updateClock(false); refreshOverlay(); }));
+// (Only the <video> that is on screen counts: the one waiting at the next cut, see 08-cutout.js, is silent here.)
+function wireVideo(el) {
+  ['seeking', 'seeked', 'timeupdate', 'play', 'pause', 'ended'].forEach(ev => el.addEventListener(ev, () => {
+    if (el !== video) return;
+    if (ev === 'pause') cutPaused();
+    updateClock(false); refreshOverlay();
+  }));
+}
+wireVideo(video0);
 
 /* ---------- layout: fit the video into the middle area ---------- */
 function fitStage() {

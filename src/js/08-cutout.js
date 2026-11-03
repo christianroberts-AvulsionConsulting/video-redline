@@ -70,11 +70,116 @@ function skipCutsCheck() {
   syncCutPos(t);
   if (!sp) return;
   if (video.paused || rangeEnd != null) { showSpan(sp, false); return; }      // sitting inside a cut, or previewing one: nothing is jumped (a Preview of a stretch plays it as asked)
-  video.currentTime = Math.min(sp.end, meta.duration);
+  if (relayJump(sp)) return;                                                  // the second <video> was waiting: no stall
+  if (relayGrace && performance.now() < relayGrace.until && sp.end === relayGrace.end && t >= sp.end - RELAY_GRACE) return;      // it landed a hair before the cut's end: play on, a seek here would stall
+  video.currentTime = Math.min(sp.end, meta.duration);                        // otherwise a plain seek (the browser has to decode from the keyframe before it: a short stall)
   showSpan(sp, true);
 }
+
+/* ---------- jumping without a stall ----------
+   A seek makes the browser decode again from the keyframe before the new spot. On a screen recording with a keyframe every few seconds that is
+   a quarter of a second or more: the picture freezes and the sound drops out at every cut, and it does not feel like the finished video.
+   So a second <video> of the same file waits just after the next cut, already decoded. A moment before the cut it starts playing, muted and
+   invisible (RELAY_LEAD), and when the playhead reaches the cut the two trade places: the waiting one is unmuted and shown, the old one is paused,
+   and the old one then goes off to wait at the cut after that. `video` always names the one on screen, so nothing else in the page notices.
+   The plain seek above stays as the safety net: it does the jump whenever the second <video> is not ready, the browser refuses it, or the
+   cut is at the very end. Nothing is written to the video or the markers. */
+const RELAY_AHEAD = 4;           // seconds: start preparing for a cut when it is this close
+const RELAY_LEAD = 0.12;         // seconds of real time the waiting video plays, muted, before it takes over (the browser's start-up delay is absorbed here)
+let spareEl = null;              // the <video> that is not on screen (null until the first cut view needs it)
+let relay = null;                // { sp, aim, ready, playing, token } while the spare is on its way to the next cut
+const RELAY_LAND = 0.012;        // seconds past the cut's end the waiting video should be at when it takes over (landing inside the cut would play a bit of it)
+const RELAY_GRACE = 0.04;        // a swap that still lands this close before the cut's end is left alone for a moment instead of being seeked
+let relayTok = 0, relayShift = 0.06, relayOff = false, relayTimer = null, relayAt = 0, inputAt = 0, relayGrace = null;      // relayShift: learnt correction, in seconds of the video (the browser takes about 40 ms to start playing)
+['keydown', 'pointerdown'].forEach(n => document.addEventListener(n, () => { inputAt = performance.now(); }, true));
+
+function relayMake() {
+  const el = document.createElement('video');
+  el.playsInline = true; el.preload = 'auto'; el.muted = true; el.className = 'spare';
+  el.addEventListener('error', () => { relayOff = true; relayCancel(); });
+  wireVideo(el);
+  video0.parentNode.insertBefore(el, video0.nextSibling);      // before the overlay, so the boxes stay on top
+  return el;
+}
+function relayCancel() {
+  relay = null; relayTok++;
+  if (spareEl) { try { spareEl.pause(); } catch (e) { /* nothing to stop */ } spareEl.muted = true; }
+}
+// The spare lets go of the file (the view goes off), so it does not hold a second decoder for nothing
+function relayRelease() {
+  if (spareEl) { spareEl.removeAttribute('src'); delete spareEl.dataset.url; try { spareEl.load(); } catch (e) { /* nothing loaded */ } }
+}
+// A new video opens (or the video is closed): the page's own <video> is the live one again
+function relayReset() {
+  relayCancel();
+  if (video !== video0) {
+    const old = video; video = video0;
+    old.classList.add('spare'); video0.classList.remove('spare'); video0.muted = false; old.muted = true;
+    spareEl = old;
+  }
+  relayRelease();
+}
+function relayStart() { if (!relayTimer) relayTimer = setInterval(relayTick, 8); }
+function relayStop() { if (relayTimer) { clearInterval(relayTimer); relayTimer = null; } relayCancel(); }
+
+function relayPrime(sp) {
+  const el = spareEl || (spareEl = relayMake()), rate = video.playbackRate || 1, token = ++relayTok;
+  relay = { sp, token, ready: false, playing: false, aim: Math.max(0, sp.end - RELAY_LEAD * rate + relayShift) };
+  if (el.dataset.url !== objectUrl) { el.src = objectUrl; el.dataset.url = objectUrl; }
+  el.muted = true; el.playbackRate = rate; el.pause();
+  const go = () => {
+    if (!relay || relay.token !== token) return;
+    el.addEventListener('seeked', () => { if (relay && relay.token === token) relay.ready = true; }, { once: true });
+    el.currentTime = relay.aim;
+  };
+  if (el.readyState >= 1) go(); else el.addEventListener('loadedmetadata', go, { once: true });
+}
+function relayTick() {
+  if (!skipCuts || !meta || relayOff) { if (relay) relayCancel(); return; }
+  if (video.paused || video.seeking || video.ended || rangeEnd != null) { if (relay) relayCancel(); return; }
+  const t = video.currentTime, rate = video.playbackRate || 1, spans = cutData().spans;
+  if (relay && (!spans.some(s => s.start === relay.sp.start && s.end === relay.sp.end) || t > relay.sp.end)) relayCancel();      // the cut it waits at is gone or edited, or the playhead is already past it
+  if (!relay) {
+    const next = spans.find(s => s.start > t + 0.0005);
+    if (next && next.end <= meta.duration - 0.1 && (next.start - t) / rate <= RELAY_AHEAD) relayPrime(next);      // (a cut that runs to the end is left to the plain seek)
+    return;
+  }
+  const sp = relay.sp;      // it keeps the cut it waits at, also in the instant the playhead reaches it
+  if (!relay.ready) return;
+  spareEl.playbackRate = rate;
+  if (!relay.playing && t >= sp.start - RELAY_LEAD * rate) {
+    relay.playing = true;
+    const p = spareEl.play(); if (p && p.catch) p.catch(() => { relayOff = true; relayCancel(); });      // (a browser that will not play it unseen: no relay, the plain seek is used)
+  }
+  if (relay.playing && t >= sp.start - 0.004 * rate) { if (relaySwap()) updateClock(true); }      // (half a tick early, so the jump is as often early as late)
+}
+// Called by skipCutsCheck() when the playhead has reached a cut: true when the waiting video took over
+function relayJump(sp) {
+  if (!relay || !relay.ready || !relay.playing || relay.sp.start !== sp.start || relay.sp.end !== sp.end) return false;
+  return relaySwap();
+}
+function relaySwap() {
+  const sp = relay.sp, nxt = spareEl, cur = video, err = nxt.currentTime - sp.end;      // err > 0: the waiting video is already past the cut's end
+  if (nxt.paused || nxt.seeking || nxt.readyState < 2 || Math.abs(err) > 0.25) { relayCancel(); return false; }
+  cur.muted = true; nxt.muted = false;
+  nxt.classList.remove('spare'); cur.classList.add('spare');
+  cur.pause();
+  video = nxt; spareEl = cur; relay = null; relayTok++; relayAt = performance.now();
+  relayShift = Math.max(-0.2, Math.min(0.2, relayShift + 0.8 * (RELAY_LAND - err)));      // aim a little earlier or later next time, so it lands just past the cut's end
+  relayGrace = { end: sp.end, until: relayAt + 300 };
+  showSpan(sp, true);
+  return true;
+}
+// The browser paused the live video by itself right after a swap (some browsers do that when sound is switched on without a click): give up on swapping and carry on playing
+function cutPaused() {
+  if (!relayAt || performance.now() - relayAt > 400 || performance.now() - inputAt < 600) return;
+  relayOff = true; relayAt = 0;
+  const p = video.play(); if (p && p.catch) p.catch(() => {});
+}
+
 function setSkipCuts(on) {
   skipCuts = !!on; ui.skipCuts = skipCuts; saveUi();
+  if (skipCuts) relayStart(); else { relayStop(); relayRelease(); }
   const b = $('bSkip'); b.classList.toggle('on', skipCuts); b.setAttribute('aria-pressed', String(skipCuts));
   b.title = skipCuts ? 'Cuts out is on: the video plays with every cut jumped over. Click to play everything again.'
                      : 'Watch the video with every cut taken out, including the ones still waiting for your decision';
