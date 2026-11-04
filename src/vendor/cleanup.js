@@ -18,6 +18,8 @@
  *     silences:[ { s, e } ],                  quiet regions (>= 0.3 s)
  *     sounds:  [ { s, e, kind, c, db } ] }    audible regions no engine turned into a word
  *                                             kind: "voiced"|"noise"|"breath"|"click"
+ *                                             optional speech:true (1.3.0): re-heard as ordinary speech, no stumble
+ *                                             (Claude's redline-draft marks it); never reported as a non-word sound
  *
  * PUBLIC API
  *   Cleanup.DEFAULTS
@@ -79,8 +81,10 @@
  *   A word's reported start is often late (up to about 0.1 s after a short gap), so a cut that ends at "the next
  *   word's start - pad" can bite the first syllable of the word that stays. When a repeat, stutter or false start is
  *   followed by a kept word, the cut ends at the edge of a measured silence if there is one, and otherwise
- *   60% of the gap (at most 0.12 s) before the reported start. A cut that starts after a short gap
- *   (0.06 to 0.25 s) starts up to 40% of that gap (at most 0.08 s) before the first removed word, for the same reason.
+ *   60% of the gap (at most 0.12 s) before the reported start. A cut never starts inside the first removed word
+ *   (1.2.2): it starts at a word-less sound that runs into that word, else at a measured silence edge, else up to 40%
+ *   of the gap before it (at most 0.12 s), for the same reason. A non-word cut reaches `pad` past both ends of the
+ *   sound (1.2.2; it used to stop `pad` inside them).
  *   Every cut is finally kept at least `pad` away from every word that no candidate cuts (overlapping input).
  *
  * PARAMS added in 1.1.0 (all optional; garbage values fall back to the default)
@@ -93,6 +97,11 @@
  * brackets and quotes, but still insert them with textContent (or escape them), never innerHTML.
  *
  * VERSIONS
+ *   1.3.0  fewer cards to review. autoPauses (balanced, thorough): a pause that holds only breaths, clicks or small noises
+ *          is applied on its own (the editor accepted all 15 such pauses on the first video; a voiced sound inside still
+ *          asks). A sound marked speech:true in the transcript is never a non-word card. Otherwise the same as 1.2.2.
+ *   1.2.2  cut edges at a removed sound go outwards, not inwards. A repeat, stutter or false start used to start `pad`
+ *          inside its first word and a non-word cut `pad` inside the sound, which left the start of it ("h-how"). Same API.
  *   1.2.1  words only: the product is called Video Redline, so the two messages that name it (a file that is not a transcript,
  *          and another kind of Video Redline file) say so. Nothing else changed: the same candidates, the same numbers, the
  *          same API. (The file format names video-review-transcript, video-review-session and video-review-library are
@@ -109,7 +118,7 @@
 }(typeof self !== 'undefined' ? self : (typeof window !== 'undefined' ? window : this), function () {
   'use strict';
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.3.0';
   var EPS = 1e-9;
   var KINDS = ['dead-space', 'filler', 'stutter', 'repeat', 'false-start', 'non-word'];
   var PRIORITY = { 'filler': 0, 'stutter': 1, 'repeat': 2, 'false-start': 3, 'non-word': 4, 'dead-space': 5 };
@@ -132,7 +141,7 @@
     includeFillers: true,
     includeDeadSpace: true,
     includeFalseStarts: true, // only used when includeStutters is on
-    pad: 0.02,             // seconds trimmed inside each cut edge so word edges are not clipped
+    pad: 0.02,             // seconds kept between a cut and a word that stays, and how far a cut reaches past a removed sound
     longGap: 6,            // a silent gap longer than this is always left for review (maybe waiting for a program)
     minSound: 0.15,        // non-word sounds shorter than this are ignored
     longSound: 0.6,        // a breath/noise longer than this is "long" (can be auto)
@@ -149,14 +158,16 @@
     level: 'careful',
     quietSounds: false,    // true = short soft sounds inside a pause (breath, click, a tap of the keyboard) do not hold the pause back for review
     quietSoundMax: 0.5,    // ... "short" means at most this many seconds (a voiced sound, a possibly missed word, always holds it back)
-    autoEdges: false       // true = a silent start or end of the video can be applied without asking
+    autoEdges: false,      // true = a silent start or end of the video can be applied without asking
+    // --- 1.3.0 ---
+    autoPauses: false      // true = a pause holding only breaths, clicks or small noises is applied without asking
   };
 
   // A level only changes the defaults of the params below; anything the caller sets explicitly still wins.
   var PRESETS = {
     careful: {},
-    balanced: { softGap: 5, longGap: 10, minNoise: 0.6, minBreath: 0.6, quietSounds: true, autoEdges: true },
-    thorough: { softGap: 10, longGap: 20, minNoise: 1.0, minBreath: 0.8, quietSounds: true, autoEdges: true, autoThreshold: 0.8 }
+    balanced: { softGap: 5, longGap: 10, minNoise: 0.6, minBreath: 0.6, quietSounds: true, autoEdges: true, autoPauses: true },
+    thorough: { softGap: 10, longGap: 20, minNoise: 1.0, minBreath: 0.8, quietSounds: true, autoEdges: true, autoPauses: true, autoThreshold: 0.8 }
   };
 
   /* ------------------------------------------------------------------ small helpers */
@@ -361,7 +372,9 @@
         var kind = typeof x.kind === 'string' ? x.kind.trim().toLowerCase() : '';
         if (!SOUND_KINDS[kind]) kind = 'noise';
         var c = num(x.c, NaN);
-        arr.push({ s: Math.max(0, s), e: e, kind: kind, c: isFinite(c) ? clamp(c > 1.5 && c <= 100 ? c / 100 : c, 0, 1) : 0.5, db: num(x.db, null) });
+        var o = { s: Math.max(0, s), e: e, kind: kind, c: isFinite(c) ? clamp(c > 1.5 && c <= 100 ? c / 100 : c, 0, 1) : 0.5, db: num(x.db, null) };
+        if (x.speech === true) o.speech = true; // re-heard as ordinary speech (1.3.0)
+        arr.push(o);
       }
     }
     arr.sort(function (a, b) { return a.s - b.s || a.e - b.e; });
@@ -397,6 +410,7 @@
     o.quietSounds = bool(p.quietSounds, d.quietSounds);
     o.quietSoundMax = Math.max(0, num(p.quietSoundMax, d.quietSoundMax));
     o.autoEdges = bool(p.autoEdges, d.autoEdges);
+    o.autoPauses = bool(p.autoPauses, d.autoPauses);
     o.minGap = Math.max(0.05, num(p.minGap, d.minGap));
     o.keepPause = Math.max(0, num(p.keepPause, d.keepPause));
     o.stutterWindow = Math.max(0, num(p.stutterWindow, d.stutterWindow));
@@ -557,7 +571,7 @@
   }
 
   // The range to cut when removing tokens chunk[0..n-1] that are followed by T[pos+1].
-  // Starts just inside the first word; ends just inside the next word, unless a long gap follows
+  // Starts just before the first word; ends just inside the gap before the next word, unless a long gap follows
   // (then dead-space handling owns the gap, so we stop at the end of the removed word).
   function chunkRange(ctx, chunk) {
     var P = ctx.P, first = chunk[0], last = chunk[chunk.length - 1];
@@ -587,14 +601,25 @@
     return next.s - Math.max(P.pad, Math.min(0.6 * g, 0.12));
   }
   // The same idea for the start edge: the first word that is cut can really begin earlier than reported, which would leave
-  // a loud stub of it. Only for a short gap before the word (0.06 to 0.25 s) that no measured silence edge explains.
+  // a stub of it ("h-how" when only the "ow" of the first "how" goes). So the cut starts before the word, never inside it: at
+  // the start of a sound with no word in it that runs into the word ("cells, b- but": the "b" is that sound), else at a
+  // measured silence edge, else up to 40% of the gap before the reported start (at most 0.12 s: a start reported up to
+  // 0.1 s late, plus the rounding to a frame).
+  // clampToKeptWords still keeps it `pad` clear of the word before.
   function cutStartAfter(ctx, first, prev) {
-    var P = ctx.P, plain = first.s + P.pad;
-    if (!prev) return plain;
+    var P = ctx.P;
+    if (!prev) return first.s - P.pad;
     var g = first.s - prev.e;
-    if (g < 0.06 || g > 0.25) return plain;
-    if (ctx.hasAudio && silenceEndNear(ctx, first.s - 0.15, first.s + 0.02, prev.e) !== null) return plain;
-    return first.s - Math.min(0.4 * g, 0.08); // at most 40% of the gap, so the word before it keeps at least 60% of it
+    if (ctx.hasAudio) {
+      var lead = null;
+      forOverlaps(ctx.soundIx, first.s - 0.12, first.s + 0.02, function (x) {
+        if (x.s > prev.e + P.pad && x.s < first.s && x.e >= first.s - 0.12 && (lead === null || x.s < lead)) lead = x.s;
+      });
+      if (lead !== null) return lead - P.pad;
+      var se = silenceEndNear(ctx, first.s - 0.15, first.s + 0.02, prev.e);
+      if (se !== null) return Math.min(first.s, se) - P.pad;
+    }
+    return first.s - Math.max(0, Math.min(0.4 * g, 0.12)); // at most 40% of the gap, so the word before it keeps at least 60% of it
   }
   // Split removed tokens into runs that sit directly next to each other (no filler or long gap between)
   function chunksOf(ctx, toks) {
@@ -883,7 +908,7 @@
       var tok = T[i];
       if (!tok.join || tok.filler || tok.claimed) continue;
       var dur = tok.e - tok.s;
-      var r = limitRange(ctx, tok.s + P.pad, tok.s + dur * tok.join - P.pad);
+      var r = limitRange(ctx, tok.s - P.pad, tok.s + dur * tok.join - P.pad); // starts before the stutter, never inside it
       if (r[1] - r[0] < P.minCut - EPS) continue;
       tok.claimed = true;
       out.push({
@@ -1097,6 +1122,10 @@
         // Anything the reason asks the user to check is never applied without asking: a sound inside the cut, and the very
         // start or end of the video (a title or a final result can sit there).
         var force = any || (!!edge && !P.autoEdges);
+        // autoPauses: a pause that holds nothing but breaths, clicks and small noises goes on its own. A voiced sound inside may
+        // be a word the transcript missed, so that pause still asks; so do a long sound (it sets force) and a long wait (below).
+        var lifted = P.autoPauses && ctx.hasAudio && !edge && !force && !kinds.voiced && conf < P.autoThreshold;
+        if (lifted) conf = P.autoThreshold;
         // The longer the silence, the likelier it is a wait the viewer needs (a recalculation, an install). Confidence glides
         // down from softGap to longGap (no cliff at one exact length); past longGap it is always left for review.
         if (gapEff > P.softGap) {
@@ -1104,7 +1133,7 @@
           conf = Math.min(conf, 0.95 - 0.2 * f);
         }
         if (gapEff > P.longGap) { force = true; conf = Math.min(conf, 0.75); }
-        pieces.push({ s: start, e: end, rs: rs, re: re, conf: conf, force: force, cover: cover, kinds: kinds, any: any, soft: softOv > 0.01 });
+        pieces.push({ s: start, e: end, rs: rs, re: re, conf: conf, force: force, cover: cover, kinds: kinds, any: any, soft: softOv > 0.01, lifted: lifted && conf >= P.autoThreshold - 1e-9 });
         total += end - start;
       }
       if (!pieces.length) return;
@@ -1127,6 +1156,7 @@
         else clause = 'nothing is said, but the audio is only quiet for ' + Math.round(pc.cover * 100) + '% of it' + (pc.soft ? ' (counting a soft breath as quiet)' : '');
         var parts = [noun + ' of ' + fmtDur(gapEff) + ' s' + where + around + ': ' + clause + '.'];
         if (pc.any) parts.push('Something audible happens inside it (' + soundsText(pc.kinds) + '), so check you do not want it.');
+        if (pc.lifted) parts.push('The rest of it is only breaths, clicks or small noises, so it is applied on its own.');
         if (edge) parts.push('Trimming the ' + (edge === 'start' ? 'start' : 'end') + ' of a video is usually safe, but check you do not want to keep it.');
         if ((gapEff > P.longGap || (!edge && gapEff > P.softGap)) && (pc.force || pc.conf < P.autoThreshold - 1e-9)) {
           parts.push('This is a long pause (' + fmtDur(gapEff) + ' s). It may be you waiting for a program to load or a result to appear, and the screen may be changing, which viewers might need to see, so it is left for you to decide.');
@@ -1178,6 +1208,7 @@
     var P = ctx.P, sounds = ctx.soundIx.items;
     for (var si = 0; si < sounds.length; si++) {
       var x = sounds[si], dur = x.e - x.s;
+      if (x.speech) continue; // re-heard as ordinary speech: a word the transcript missed, nothing to cut
       var pieces = [[x.s, x.e]], covered = 0;
       forOverlaps(ctx.wordIx, x.s, x.e, function (tok) {
         covered += Math.min(tok.e, x.e) - Math.max(tok.s, x.s);
@@ -1195,7 +1226,9 @@
         var a0 = pieces[pi][0], b0 = pieces[pi][1], len = b0 - a0;
         if (len < P.minSound - EPS) continue;
         if (insideDead(ctx, a0, b0)) continue; // the dead-space cut already covers it
-        var r = limitRange(ctx, a0 + P.pad, b0 - P.pad);
+        // the sound is what goes, so the cut reaches `pad` past each end of it (padding inwards kept its first and last
+        // 0.02 s, an audible stub); clampToKeptWords keeps it clear of a word beside it
+        var r = limitRange(ctx, a0 - P.pad, b0 + P.pad);
         if (r[1] - r[0] < P.minCut - EPS) continue;
         var loud = x.db !== null && x.db >= P.loudDb;
         var isLong = len > P.longSound;

@@ -16,6 +16,7 @@ let hideCuts = false;                           // the timeline draws no cut tra
 let cutCache = null, cutKey = '';               // { cuts, spans, removed }, rebuilt when the markers or the panel's cards change
 let chipRange = null;                           // { lo, hi }: the stretch the bar's buttons act on
 let panelSeen = null, panelSerial = 0, seenRev = '';
+let tasteSpans = null;                          // { cuts: [], spans, removed } while the Taste Test (10-taste.js) plays a clip: the jumps play those stretches instead of the timeline's cuts
 
 const isFinalCut = m => !(m.origin && m.origin.auto === true);       // an automatic cut is a proposal until it is accepted; every other cut is the user's own
 // A string that changes when the open panel is another one or its cards changed (each video gets a new panel, whose counter starts again)
@@ -51,6 +52,7 @@ function buildCuts() {
 }
 function cutData() {
   if (!meta) return { cuts: [], spans: [], removed: 0 };
+  if (tasteSpans) return tasteSpans;
   const key = ver + '|' + panelRev() + '|' + meta.duration;
   if (!cutCache || key !== cutKey) { cutCache = buildCuts(); cutKey = key; }
   return cutCache;
@@ -236,7 +238,7 @@ function syncCutPos(t) {
 }
 function syncCutBar() {
   const bar = $('cutbar'); if (!bar) return;
-  bar.hidden = !(skipCuts && meta);
+  bar.hidden = !(skipCuts && meta) || !!tasteSpans;      // (a Taste Test clip borrows the jumps, not the bar)
   if (bar.hidden) return;
   const d = cutData(), n = { final: 0, proposed: 0, undecided: 0 };
   d.cuts.forEach(c => { n[c.state]++; });

@@ -499,3 +499,32 @@ label.field, div.field { display: grid; gap: 5px; font-size: 12px; color: var(--
   .app.show-left .panel.left, .app.show-right .panel.right { display: flex; }
   .tc, .speed { width: auto; }
 }
+
+/* ---------- Taste Test (10-taste.js) ---------- */
+#tasteHost { display: grid; gap: 12px; }
+.taste-intro { display: grid; gap: 4px; }
+.taste-intro b { font-size: 14px; }
+.taste-said { color: var(--warn); font-size: 12px; line-height: 1.5; }
+.taste-box { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--panel-2); }
+.taste-box p { margin: 0; }
+.taste-form label { display: grid; gap: 5px; font-size: 12px; color: var(--text-2); }
+.taste-form input { width: 100%; }
+.taste-who button.linkish, .linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+.taste-size { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.taste-sec > h4 { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); margin: 4px 0 8px; }
+.taste-sec > p { margin: 0; }
+.taste-step { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; }
+.taste-step-t { display: grid; gap: 3px; }
+.taste-step.ready { border-color: var(--accent); background: var(--accent-soft); }
+.taste-step.later { opacity: .55; grid-template-columns: 1fr auto; align-items: center; }
+.taste-step .row-btns { margin-top: 4px; }
+.taste-pair-head { display: flex; align-items: center; gap: 8px; }
+.taste-pair-head .grow { flex: 1; }
+.taste-answers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.taste-answers .btn { height: 40px; }
+.taste-note { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.taste-result ul, .taste-lines ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12.5px; line-height: 1.45; }
+.taste-lines h4 { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-3); margin: 0 0 6px; }
+.taste-badge { position: absolute; left: 14px; top: 12px; z-index: 5; min-width: 46px; height: 46px; padding: 0 10px; border-radius: 12px; display: grid; place-items: center;
+  font: 700 26px/1 var(--font); color: #fff; background: rgba(20, 22, 26, .78); border: 2px solid var(--accent); pointer-events: none; }
+.taste-badge[hidden] { display: none; }

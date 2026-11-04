@@ -15,3 +15,5 @@ __pycache__/
 *.ico
 # What "Teach it your ums" learned from this person's own recordings and choices (fingerprints only, no audio).
 teach/
+# Taste Test set-up: the editor, channel and vault folder (a Pinecone API key saved here by an earlier version is a secret: never commit it).
+taste/

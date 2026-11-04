@@ -45,6 +45,16 @@ Endpoints (JSON unless noted)
                                      Accept / Reject choices of ONE video taught it, retrains, answers with the summary
     POST   /teach/forget             body = JSON { what: "all" | "clips" | "decisions" | "clip:<id>" }, answers with the summary
 
+    "Taste Test" (an editor's taste profile, kept as a note in their own Obsidian vault; see vrt_taste.py)
+    GET    /taste                    { ok, setUp, editor, channel, vault (the folder's name only), noteExists, profile (the data
+                                     block of the editor's note, or null), problem (only when not set up) }
+    POST   /taste/setup              body = JSON { editor, channel (optional), vault (optional: full folder path of an Obsidian vault;
+                                     left out, the vault of an earlier set-up is kept, or a new one, "Video Redline Vault" in
+                                     Documents, is made and added to Obsidian's list of vaults) }. Answers like GET /taste, plus
+                                     result: { vault: { created, message } }.
+    POST   /taste/profile            body = JSON { profile } (at most 2 MB): writes <vault>/Video Redline/Taste/<editor>.md
+                                     -> { ok, note }
+
 Errors are always { error: "<code>", message: "<plain language>" }.
 
 SECURITY: WHAT THIS HELPER DOES AND DOES NOT PROTECT (read this before changing the checks below)
@@ -754,6 +764,8 @@ def private_python():
 TEACH_DIR = os.environ.get("VRT_TEACH_DIR") or os.path.join(TOOLS_DIR, "teach")      # (the variable is for tests)
 TEACH_MAX_BODY = 20 * 1024 * 1024          # the examples of one video (a few thousand fingerprints) are well under this
 TEACH_LOCK = threading.Lock()              # one change to what was learned at a time
+TASTE_MAX_BODY = {"/taste/setup": 64 * 1024,                # a name, a channel and a folder path
+                  "/taste/profile": 2 * 1024 * 1024}        # one editor's taste profile (a few hundred rounds are well under this)
 
 
 def teach_summary():
@@ -1659,6 +1671,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._post_job()
             if path == "/teach" or path.startswith("/teach/"):
                 return self._teach(method, path)
+            if path == "/taste" or path.startswith("/taste/"):
+                return self._taste(method, path)
             m = re.fullmatch(r"/jobs/([^/]+)(?:/(result|cancel))?", path)
             if not m:
                 return self.fail(404, "not-found", "There is nothing at that address.")
@@ -1758,6 +1772,38 @@ class Handler(BaseHTTPRequestHandler):
         if summary is None:
             return self.fail(500, "teach-failed", "The helper could not store that. Try again.")
         self._send_json(200, summary)
+
+    # ---- /taste ------------------------------------------------------------------------------------
+    def _taste(self, method, path):
+        """Taste Test: the editor's taste profile, kept as a note in their own Obsidian vault (vrt_taste.py does the work)."""
+        import vrt_taste
+        if path == "/taste":
+            if method != "GET":
+                return self._method_not_allowed("GET")
+            return self._send_json(200, vrt_taste.status())
+        limit = TASTE_MAX_BODY.get(path)
+        if limit is None:
+            return self.fail(404, "not-found", "There is nothing at that address.")
+        if method != "POST":
+            return self._method_not_allowed("POST")
+        cl = (self.headers.get("Content-Length") or "").strip()
+        if self.headers.get("Transfer-Encoding") is not None or not re.fullmatch(r"[0-9]{1,15}", cl or "x"):
+            return self.fail(411, "length-required", "The request must say how large it is (Content-Length).")
+        if int(cl) > limit:
+            return self.fail(413, "too-big", "That is more than the helper takes in one go.")
+        try:
+            raw = self.rfile.read(int(cl))
+            self.body_remaining = 0
+            body = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, OSError):
+            return self.fail(400, "bad-request", "The request could not be read.")
+        if not isinstance(body, dict):
+            return self.fail(400, "bad-request", "The request could not be read.")
+        try:
+            answer = vrt_taste.setup(body) if path == "/taste/setup" else vrt_taste.save_profile(body)
+        except vrt_taste.TasteError as e:
+            return self.fail(e.status, e.code, e.message)
+        self._send_json(200, answer)
 
     # ---- POST /jobs --------------------------------------------------------------------------------
     def _post_job(self):

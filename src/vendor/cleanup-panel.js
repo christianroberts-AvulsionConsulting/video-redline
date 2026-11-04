@@ -246,11 +246,14 @@
  * as before. The panel never says that a page or a button starts the helper.
  * 1.2.1 (round 3e) changes one condition and no member: a job that failed inside the helper with the plain word 'failed' (no cause of its own)
  * now shows the helper's own message first and the client's next steps after it; before, the message was dropped for the generic advice.
+ * 1.3.0 changes no member: a card that Claude's drafted cuts (origin.by 'claude') cover for half its length or more is left out of
+ * "Needs your decision", its count and Accept all / Reject all, and the summary says "N inside Claude's cuts". Putting Claude's cut
+ * back brings the card back. The editor judges that spot once, as Claude's cut.
  */
 var CleanupPanel = (function () {
   'use strict';
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.3.0';
   var KEYS = {
     transcript: 'vrt:cleanup:transcript',
     settings: 'vrt:cleanup:settings',
@@ -506,7 +509,8 @@ var CleanupPanel = (function () {
     function secs(v) { return showSecs && typeof v === 'number' && isFinite(v) ? ' (' + formatDuration(v) + ')' : ''; }
     var done = n.applied + ' ' + plural(n.applied, 'applied on its own', 'applied on their own') + secs(n.appliedSeconds);
     var pend = n.pending === 0 ? 'none need you' : (n.pending + ' ' + plural(n.pending, 'needs', 'need') + ' you' + secs(n.pendingSeconds));
-    return 'Found ' + n.total + ' ' + plural(n.total, 'cut', 'cuts') + ': ' + done + ', ' + pend + '.' + (n.brief ? saves : '');
+    var cov = n.covered > 0 ? ', ' + n.covered + ' inside Claude’s cuts' : '';
+    return 'Found ' + n.total + ' ' + plural(n.total, 'cut', 'cuts') + ': ' + done + ', ' + pend + cov + '.' + (n.brief ? saves : '');
   }
   /** the note under the level choice: "Balanced: 113 applied on their own, 182 need you." */
   function levelNoteText(label, applied, pending) {
@@ -1911,7 +1915,17 @@ var CleanupPanel = (function () {
     }
 
     /* ---------------- candidates ---------------- */
-    function pendingList() { return S.candidates.filter(function (c) { return c.st === 'pending'; }); }
+    // A card that Claude's drafted cuts already cover (half of it or more) does not wait for a decision of its own: that spot is
+    // judged once, as Claude's cut. Put Claude's cut back and the card is in the queue again. (1.3.0)
+    function claudeCovers() {
+      var spans = getCutsSafe().filter(function (x) { return x.origin && x.origin.by === 'claude' && isFinite(x.start) && isFinite(x.end); });
+      return function (c) {
+        var len = c.end - c.start, ov = 0;
+        for (var i = 0; i < spans.length; i++) { ov += Math.max(0, Math.min(spans[i].end, c.end) - Math.max(spans[i].start, c.start)); }
+        return len > 0 && ov >= 0.5 * len - 1e-9;
+      };
+    }
+    function pendingList() { var cov = claudeCovers(); return S.candidates.filter(function (c) { return c.st === 'pending' && !cov(c); }); }
     function candForLink(l) {
       if (l.cid && S.candById[l.cid]) { return S.candById[l.cid]; }
       var best = null, bd = 1;
@@ -2297,11 +2311,11 @@ var CleanupPanel = (function () {
 
     /* ---------------- summary numbers ---------------- */
     function counts() {
-      var n = { total: 0, applied: 0, pending: 0, accepted: 0, rejected: 0, manual: 0, saves: 0, pendingSeconds: 0, appliedSeconds: 0 };
-      var pend = [], auto = [];
+      var n = { total: 0, applied: 0, pending: 0, covered: 0, accepted: 0, rejected: 0, manual: 0, saves: 0, pendingSeconds: 0, appliedSeconds: 0 };
+      var pend = [], auto = [], cov = claudeCovers();
       S.candidates.forEach(function (c) {
         n.total++;
-        if (c.st === 'auto') { n.applied++; auto.push(c); } else if (c.st === 'pending') { n.pending++; pend.push(c); }
+        if (c.st === 'auto') { n.applied++; auto.push(c); } else if (c.st === 'pending' && cov(c)) { n.covered++; } else if (c.st === 'pending') { n.pending++; pend.push(c); }
         else if (c.st === 'accepted') { n.accepted++; } else if (c.st === 'rejected') { n.rejected++; }
       });
       S.links.forEach(function (l) { if (l.kind === 'manual') { n.manual++; } });
@@ -2964,7 +2978,7 @@ var CleanupPanel = (function () {
       if (has) {
         var n = counts();
         E.summary.textContent = summaryText({
-          total: n.total, applied: n.applied, pending: n.pending, saves: n.saves, appliedSeconds: n.appliedSeconds, pendingSeconds: n.pendingSeconds
+          total: n.total, applied: n.applied, pending: n.pending, covered: n.covered, saves: n.saves, appliedSeconds: n.appliedSeconds, pendingSeconds: n.pendingSeconds
         });
         var bits = [];
         if (n.saves >= 0.5) { bits.push('Saves ' + formatDuration(n.saves) + ' so far'); }
